@@ -29,6 +29,7 @@ ROBOT_XML_DICT = {
     "tienkung": _resolve_path("assets/tienkung/mjcf/tienkung.xml"),
     "pal_talos": _resolve_path("assets/pal_talos/talos.xml"),
     "fourier_gr3": _resolve_path("assets/fourier_gr3v2_1_1/mjcf/gr3v2_1_1_dummy_hand.xml"),
+    "azureloong_v9": _resolve_path("assets/azureloong_v9/azureloong_v9.xml"),
 }
 
 IK_CONFIG_DICT = {
@@ -51,6 +52,7 @@ IK_CONFIG_DICT = {
         "pnd_adam_lite": _resolve_path("ik_configs/smplx_to_adam.json"),
         "tienkung": _resolve_path("ik_configs/smplx_to_tienkung.json"),
         "fourier_gr3": _resolve_path("ik_configs/smplx_to_gr3.json"),
+        "azureloong_v9": _resolve_path("ik_configs/smplx_to_azureloong_v9.json"),
     },
     "bvh_lafan1": {
         "unitree_g1": _resolve_path("ik_configs/bvh_lafan1_to_g1.json"),
@@ -60,6 +62,7 @@ IK_CONFIG_DICT = {
         "stanford_toddy": _resolve_path("ik_configs/bvh_lafan1_to_toddy.json"),
         "engineai_pm01": _resolve_path("ik_configs/bvh_lafan1_to_pm01.json"),
         "pal_talos": _resolve_path("ik_configs/bvh_to_talos.json"),
+        "azureloong_v9": _resolve_path("ik_configs/bvh_lafan1_to_azureloong_v9.json"),
     },
     "bvh_nokov": {
         "unitree_g1": _resolve_path("ik_configs/bvh_nokov_to_g1.json"),
@@ -106,6 +109,28 @@ ROBOT_BASE_DICT = {
     "tienkung": "Base_link",
     "pal_talos": "base_link",
     "fourier_gr3": "base_link",
+    "azureloong_v9": "base_link",
+}
+
+ROBOT_FOOT_NAMES_DICT: dict[str, tuple[str, str]] = {
+    "unitree_g1": ("left_ankle_roll_link", "right_ankle_roll_link"),
+    "unitree_g1_with_hands": ("left_ankle_roll_link", "right_ankle_roll_link"),
+    "unitree_h1": ("left_ankle_roll_link", "right_ankle_roll_link"),
+    "unitree_h1_2": ("left_ankle_roll_link", "right_ankle_roll_link"),
+    "booster_t1_29dof": ("left_ankle_link", "right_ankle_link"),
+    "stanford_toddy": ("left_foot_link", "right_foot_link"),
+    "fourier_n1": ("ankle_l", "ankle_r"),
+    "engineai_pm01": ("left_foot", "right_foot"),
+    "kuavo_s45": ("l_foot_bottom", "r_foot_bottom"),
+    "hightorque_hi": ("L_ankle_roll", "R_ankle_roll"),
+    "galaxea_r1pro": ("left_ankle_link", "right_ankle_link"),
+    "berkeley_humanoid_lite": ("left_ankle", "right_ankle"),
+    "booster_k1": ("left_ankle_pitch_link", "right_ankle_pitch_link"),
+    "pnd_adam_lite": ("left_ankle_roll_link", "right_ankle_roll_link"),
+    "tienkung": ("LeftFoot", "RightFoot"),
+    "pal_talos": ("left_ankle_link", "right_ankle_link"),
+    "fourier_gr3": ("ankle_l", "ankle_r"),
+    "azureloong_v9": ("link_ankle_l_roll", "link_ankle_r_roll"),
 }
 
 VIEWER_CAM_DISTANCE_DICT = {
@@ -127,4 +152,5 @@ VIEWER_CAM_DISTANCE_DICT = {
     "tienkung": 3.0,
     "pal_talos": 3.0,
     "fourier_gr3": 2.0,
+    "azureloong_v9": 2.0,
 }

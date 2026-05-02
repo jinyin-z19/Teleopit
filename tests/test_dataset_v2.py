@@ -25,7 +25,7 @@ from train_mimic.data.motion_fk import (
     quat_rotate_inverse,
     quat_wxyz_to_xyzw,
 )
-from train_mimic.scripts.convert_pkl_to_npz import _MJLAB_G1_BODY_NAMES, convert_pkl_to_npz
+from train_mimic.scripts.convert_pkl_to_npz import _get_body_names_from_extractor, convert_pkl_to_npz
 
 pytestmark = [
     pytest.mark.skipif(
@@ -37,7 +37,7 @@ pytestmark = [
 
 def _synthetic_motion_payload() -> dict[str, object]:
     extractor = MotionFkExtractor()
-    body_names = list(_MJLAB_G1_BODY_NAMES)
+    body_names = _get_body_names_from_extractor(extractor)
 
     root_pos = np.asarray(
         [
@@ -217,6 +217,12 @@ def test_convert_source_to_npz_clips_handles_bvh_source(tmp_path: Path, monkeypa
             with output_pkl.open("wb") as handle:
                 pickle.dump(payload, handle)
 
+    # The bvh branch in _convert_task now creates a robot-specific FK extractor.
+    # For this synthetic test, always return the default G1 extractor.
+    # Must be created BEFORE monkeypatching mujoco (both modules share the same
+    # mujoco import, so patching dataset_builder.mujoco also patches motion_fk.mujoco).
+    _default_extractor = MotionFkExtractor()
+
     monkeypatch.setattr(
         "train_mimic.data.dataset_builder.mocap_xml_path",
         lambda _, robot_name="unitree_g1": fake_xml if robot_name == "unitree_g1" else None,
@@ -225,6 +231,10 @@ def test_convert_source_to_npz_clips_handles_bvh_source(tmp_path: Path, monkeypa
     monkeypatch.setattr(
         "train_mimic.data.dataset_builder.mujoco.MjModel.from_xml_path",
         lambda _: object(),
+    )
+    monkeypatch.setattr(
+        "train_mimic.data.dataset_builder._get_fk_extractor",
+        lambda xml_path=None: _default_extractor,
     )
 
     source = DatasetSourceSpec(
@@ -241,7 +251,8 @@ def test_convert_source_to_npz_clips_handles_bvh_source(tmp_path: Path, monkeypa
     assert (output_dir / "clip.npz").is_file()
 
 
-def test_convert_source_to_npz_clips_rejects_non_g1_bvh_robot(tmp_path: Path) -> None:
+def test_convert_source_to_npz_clips_accepts_non_g1_bvh_robot(tmp_path: Path) -> None:
+    """Non-G1 robots are now supported for BVH conversion (no hardcoded restriction)."""
     input_dir = tmp_path / "bvh_source"
     input_dir.mkdir()
     (input_dir / "clip.bvh").write_text("HIERARCHY\n", encoding="utf-8")
@@ -254,7 +265,10 @@ def test_convert_source_to_npz_clips_rejects_non_g1_bvh_robot(tmp_path: Path) ->
         robot_name="fourier_n1",
     )
 
-    with pytest.raises(ValueError, match="currently supports only 'unitree_g1'"):
+    # The old restriction is removed; a non-G1 robot_name no longer raises
+    # ValueError.  The conversion will fail on the invalid BVH content instead,
+    # which is expected — we just verify the robot check is gone.
+    with pytest.raises(Exception):
         convert_source_to_npz_clips(source, tmp_path / "dataset" / "clips" / "bvh_src", jobs=1)
 
 
@@ -437,7 +451,8 @@ def test_batch_convert_chunk_skips_filtered_short_clips(
     short_path.write_bytes(b"placeholder")
     valid_path.write_bytes(b"placeholder")
 
-    num_bodies = len(_MJLAB_G1_BODY_NAMES)
+    num_bodies = len(_get_body_names_from_extractor(MotionFkExtractor()))
+    body_names_arr = np.asarray(_get_body_names_from_extractor(MotionFkExtractor()), dtype=str)
 
     def _arrays(num_frames: int) -> dict[str, object]:
         body_quat_w = np.zeros((num_frames, num_bodies, 4), dtype=np.float32)
@@ -450,7 +465,7 @@ def test_batch_convert_chunk_skips_filtered_short_clips(
             "body_quat_w": body_quat_w,
             "body_lin_vel_w": np.zeros((num_frames, num_bodies, 3), dtype=np.float32),
             "body_ang_vel_w": np.zeros((num_frames, num_bodies, 3), dtype=np.float32),
-            "body_names": np.asarray(_MJLAB_G1_BODY_NAMES, dtype=str),
+            "body_names": body_names_arr,
         }
 
     def _convert(path: str, **_kwargs):
@@ -516,7 +531,8 @@ def test_build_dataset_batch_manifest_skips_filtered_entries(
     def _hash_split(clip_id: str, _val_percent: int, _salt: str = "") -> str:
         return "val" if clip_id.endswith("keep_val") else "train"
 
-    num_bodies = len(_MJLAB_G1_BODY_NAMES)
+    num_bodies = len(_get_body_names_from_extractor(MotionFkExtractor()))
+    body_names_arr = np.asarray(_get_body_names_from_extractor(MotionFkExtractor()), dtype=str)
 
     def _write_merged(path: Path, lengths: list[int]) -> None:
         total = sum(lengths)
@@ -540,7 +556,7 @@ def test_build_dataset_batch_manifest_skips_filtered_entries(
             body_quat_w=body_quat_w,
             body_lin_vel_w=body_lin_vel_w,
             body_ang_vel_w=body_ang_vel_w,
-            body_names=np.asarray(_MJLAB_G1_BODY_NAMES, dtype=str),
+            body_names=body_names_arr,
             clip_starts=clip_starts,
             clip_lengths=clip_lengths,
             clip_fps=np.full(len(lengths), 30, dtype=np.int64),

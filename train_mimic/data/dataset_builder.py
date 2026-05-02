@@ -36,6 +36,7 @@ from train_mimic.scripts.convert_pkl_to_npz import (
     convert_seed_csv_to_arrays,
 )
 from teleopit.retargeting.export_pkl import convert_bvh_to_retarget_pkl, mocap_xml_path
+from teleopit.retargeting.gmr.params import ROBOT_BASE_DICT, ROBOT_FOOT_NAMES_DICT
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPEC_PATH = PROJECT_ROOT / "train_mimic" / "configs" / "datasets" / "twist2_full.yaml"
@@ -44,7 +45,6 @@ DEFAULT_FK_SAMPLE_CLIPS = 2
 DEFAULT_FK_SAMPLE_FRAMES = 16
 SOURCE_TYPES = {"bvh", "pkl", "npz", "seed_csv"}
 BVH_FORMATS = {"lafan1", "hc_mocap", "nokov"}
-SUPPORTED_BVH_ROBOT_NAME = "unitree_g1"
 
 _SOURCE_SUFFIXES = {
     "bvh": ".bvh",
@@ -165,17 +165,30 @@ def _validate_source_type(raw_type: object, spec_path: Path, source_name: str) -
     return source_type
 
 
-def _load_preprocess_spec(raw: object, spec_path: Path) -> DatasetPreprocessSpec:
+def _load_preprocess_spec(
+    raw: object,
+    spec_path: Path,
+    *,
+    robot_name: str | None = None,
+) -> DatasetPreprocessSpec:
     if raw is None:
-        return DatasetPreprocessSpec()
+        raw = {}
     if not isinstance(raw, dict):
         raise ValueError(f"dataset spec preprocess must be a mapping: {spec_path}")
-    foot_body_names = raw.get("foot_body_names", ("left_ankle_roll_link", "right_ankle_roll_link"))
+
+    # Resolve robot-specific defaults from the known robot dictionaries.
+    default_root = ROBOT_BASE_DICT.get(robot_name or "", "pelvis")
+    default_feet = ROBOT_FOOT_NAMES_DICT.get(
+        robot_name or "",
+        ("left_ankle_roll_link", "right_ankle_roll_link"),
+    )
+
+    foot_body_names = raw.get("foot_body_names", list(default_feet))
     if isinstance(foot_body_names, list):
         foot_body_names = tuple(str(name) for name in foot_body_names)
     spec = DatasetPreprocessSpec(
         normalize_root_xy=bool(raw.get("normalize_root_xy", False)),
-        root_body_name=str(raw.get("root_body_name", "pelvis")).strip() or "pelvis",
+        root_body_name=str(raw.get("root_body_name", default_root)).strip() or default_root,
         ground_align=str(raw.get("ground_align", "none")).strip() or "none",
         foot_body_names=tuple(foot_body_names),
         min_frames=int(raw.get("min_frames", 1)),
@@ -218,10 +231,18 @@ def load_dataset_spec(path: str | Path) -> DatasetSpec:
         raise ValueError(f"dataset spec val_percent must be in [1, 99]: {spec_path}")
 
     hash_salt = str(payload.get("hash_salt", ""))
-    preprocess = _load_preprocess_spec(payload.get("preprocess"), spec_path)
     raw_sources = payload.get("sources")
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ValueError(f"dataset spec must define a non-empty sources list: {spec_path}")
+
+    # Resolve the primary robot_name for preprocess defaults (first source wins).
+    primary_robot_name: str | None = None
+    if raw_sources and isinstance(raw_sources[0], dict):
+        primary_robot_name = str(raw_sources[0].get("robot_name", "")).strip() or None
+
+    preprocess = _load_preprocess_spec(
+        payload.get("preprocess"), spec_path, robot_name=primary_robot_name
+    )
 
     sources: list[DatasetSourceSpec] = []
     seen_names: set[str] = set()
@@ -331,12 +352,7 @@ def _ensure_not_dataset_root_npz_input(source: DatasetSourceSpec, input_path: Pa
 
 def _resolve_bvh_xml_path(source: DatasetSourceSpec) -> Path:
     assert source.type == "bvh"
-    if source.robot_name != SUPPORTED_BVH_ROBOT_NAME:
-        raise ValueError(
-            f"source {source.name!r} uses robot_name={source.robot_name!r}, but dataset BVH conversion "
-            f"currently supports only {SUPPORTED_BVH_ROBOT_NAME!r}. Use robot_name={SUPPORTED_BVH_ROBOT_NAME!r}."
-        )
-    xml_path = mocap_xml_path(PROJECT_ROOT, SUPPORTED_BVH_ROBOT_NAME)
+    xml_path = mocap_xml_path(PROJECT_ROOT, source.robot_name)
     if not xml_path.is_file():
         raise FileNotFoundError(f"MuJoCo XML not found for BVH conversion: {xml_path}")
     return xml_path
@@ -488,8 +504,15 @@ def _pending_tasks(tasks: list[ConversionTask]) -> list[ConversionTask]:
     return [task for task in tasks if not Path(task.output_path).is_file()]
 
 
-def _get_fk_extractor() -> MotionFkExtractor:
+def _get_fk_extractor(xml_path: str | None = None) -> MotionFkExtractor:
+    """Return a MotionFkExtractor, optionally using a robot-specific XML path.
+
+    When *xml_path* is provided, a new extractor is created for that XML.
+    Otherwise, the default (G1) extractor is reused across calls (process-local cache).
+    """
     global _PROCESS_FK_EXTRACTOR
+    if xml_path is not None:
+        return MotionFkExtractor(xml_path)
     if _PROCESS_FK_EXTRACTOR is None:
         _PROCESS_FK_EXTRACTOR = MotionFkExtractor()
     return _PROCESS_FK_EXTRACTOR
@@ -585,7 +608,10 @@ def _convert_task(task: ConversionTask) -> str:
                     task.max_frames,
                     model,
                 )
-                convert_pkl_to_npz(str(tmp_pkl), str(output_path), extractor=extractor)
+                # Use the robot-specific mocap XML for FK extraction so body
+                # names and DOF count match the retargeted PKL.
+                fk_extractor = _get_fk_extractor(task.mocap_xml)
+                convert_pkl_to_npz(str(tmp_pkl), str(output_path), extractor=fk_extractor)
             _maybe_preprocess_npz_file(
                 output_path,
                 preprocess=task.preprocess,

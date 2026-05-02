@@ -23,8 +23,6 @@ REQUIRED_NPZ_KEYS = [
     "body_names",
 ]
 
-NUM_ACTIONS = 29
-
 
 @dataclass(frozen=True)
 class NpzMeta:
@@ -126,8 +124,8 @@ def inspect_clip_dict(payload: Mapping[str, Any]) -> NpzMeta:
     body_ang_vel_w = np.asarray(payload["body_ang_vel_w"])
     body_names = np.asarray(payload["body_names"])
 
-    if joint_pos.ndim != 2 or joint_pos.shape[1] != NUM_ACTIONS:
-        raise ValueError(f"joint_pos must be (T,{NUM_ACTIONS}), got {joint_pos.shape}")
+    if joint_pos.ndim != 2 or joint_pos.shape[1] < 1:
+        raise ValueError(f"joint_pos must be 2-D with at least one action, got {joint_pos.shape}")
     if joint_vel.ndim != 2 or joint_vel.shape != joint_pos.shape:
         raise ValueError(f"joint_vel shape mismatch: {joint_vel.shape} vs {joint_pos.shape}")
     if body_pos_w.ndim != 3 or body_pos_w.shape[2] != 3:

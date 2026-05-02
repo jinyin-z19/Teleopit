@@ -15,7 +15,7 @@ from train_mimic.data.motion_fk import (
     quat_wxyz_to_xyzw,
 )
 from train_mimic.scripts.convert_pkl_to_npz import (
-    _MJLAB_G1_BODY_NAMES,
+    _get_body_names_from_extractor,
     main as convert_main,
     convert_pkl_to_npz,
 )
@@ -30,7 +30,7 @@ pytestmark = [
 
 def _synthetic_motion_payload() -> dict[str, object]:
     extractor = MotionFkExtractor()
-    body_names = list(_MJLAB_G1_BODY_NAMES)
+    body_names = _get_body_names_from_extractor(extractor)
 
     root_pos = np.asarray(
         [
@@ -105,7 +105,9 @@ def test_compute_npz_fk_consistency_detects_corrupted_body_orientation(tmp_path:
     convert_pkl_to_npz(str(pkl_path), str(npz_path))
 
     data = dict(np.load(npz_path, allow_pickle=True))
-    data["body_quat_w"] = np.tile(data["body_quat_w"][:, :1, :], (1, len(_MJLAB_G1_BODY_NAMES), 1))
+    extractor = MotionFkExtractor()
+    num_bodies = len(_get_body_names_from_extractor(extractor))
+    data["body_quat_w"] = np.tile(data["body_quat_w"][:, :1, :], (1, num_bodies, 1))
     bad_npz_path = tmp_path / "clip_bad.npz"
     np.savez(bad_npz_path, **data)
 

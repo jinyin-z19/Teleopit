@@ -10,3 +10,4 @@ sources:
     type: bvh
     input: data/lafan1_bvh
     bvh_format: lafan1
+    robot_name: azureloong_v9

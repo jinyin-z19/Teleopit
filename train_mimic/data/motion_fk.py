@@ -223,20 +223,24 @@ def compute_npz_fk_consistency(
     inspect_npz(path)
     data = np.load(path, allow_pickle=True)
 
-    body_names = [str(name) for name in np.asarray(data["body_names"])]
-    if "pelvis" not in body_names:
-        raise ValueError(f"NPZ body_names missing required root body 'pelvis': {path}")
+    extractor = MotionFkExtractor(model_path)
+    root_body_name = extractor.model.body(1).name  # first non-world body
 
-    pelvis_idx = body_names.index("pelvis")
+    body_names = [str(name) for name in np.asarray(data["body_names"])]
+    if root_body_name not in body_names:
+        raise ValueError(
+            f"NPZ body_names missing required root body {root_body_name!r}: {path}"
+        )
+
+    root_idx = body_names.index(root_body_name)
     joint_pos = np.asarray(data["joint_pos"], dtype=np.float32)
     body_pos_w = np.asarray(data["body_pos_w"], dtype=np.float32)
     body_quat_w = normalize_quaternion(np.asarray(data["body_quat_w"], dtype=np.float32))
 
     frame_indices = _sample_frame_indices(int(joint_pos.shape[0]), sample_count, seed)
-    root_pos = body_pos_w[frame_indices, pelvis_idx, :]
-    root_quat_wxyz = body_quat_w[frame_indices, pelvis_idx, :]
+    root_pos = body_pos_w[frame_indices, root_idx, :]
+    root_quat_wxyz = body_quat_w[frame_indices, root_idx, :]
 
-    extractor = MotionFkExtractor(model_path)
     fk_body_pos_w, fk_body_quat_w = extractor.extract(
         root_pos,
         root_quat_wxyz,

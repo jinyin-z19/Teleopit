@@ -59,26 +59,20 @@ _SEED_CSV_ROOT_ROTATE_COLS = slice(4, 7)      # X, Y, Z Euler degrees
 _SEED_CSV_JOINT_DOF_COLS = slice(7, 36)       # 29 DOFs in degrees
 
 
-# mjlab G1 robot body ordering (matches robot.body_names from G1_ROBOT_CFG).
-# mjlab's MotionLoader uses robot body indices to index into NPZ body_pos_w,
-# so NPZ body ordering MUST match this list exactly.
-_MJLAB_G1_BODY_NAMES = [
-    "pelvis",
-    "left_hip_pitch_link", "left_hip_roll_link", "left_hip_yaw_link",
-    "left_knee_link", "left_ankle_pitch_link", "left_ankle_roll_link",
-    "right_hip_pitch_link", "right_hip_roll_link", "right_hip_yaw_link",
-    "right_knee_link", "right_ankle_pitch_link", "right_ankle_roll_link",
-    "waist_yaw_link", "waist_roll_link", "torso_link",
-    "left_shoulder_pitch_link", "left_shoulder_roll_link", "left_shoulder_yaw_link",
-    "left_elbow_link", "left_wrist_roll_link", "left_wrist_pitch_link", "left_wrist_yaw_link",
-    "right_shoulder_pitch_link", "right_shoulder_roll_link", "right_shoulder_yaw_link",
-    "right_elbow_link", "right_wrist_roll_link", "right_wrist_pitch_link", "right_wrist_yaw_link",
-]
-def _validate_required_bodies(body_names: list[str], pkl_path: str) -> None:
-    missing = sorted(set(_MJLAB_G1_BODY_NAMES).difference(body_names))
+def _get_body_names_from_extractor(extractor: MotionFkExtractor) -> list[str]:
+    """Return the non-world body names from the extractor's MuJoCo model."""
+    return [extractor.model.body(i).name for i in range(1, extractor.model.nbody)]
+
+
+def _validate_required_bodies(
+    body_names: list[str],
+    expected_body_names: list[str],
+    pkl_path: str,
+) -> None:
+    missing = sorted(set(expected_body_names).difference(body_names))
     if missing:
         raise ValueError(
-            f"PKL body metadata missing required G1 bodies for conversion: {missing}. "
+            f"PKL body metadata missing required bodies for conversion: {missing}. "
             f"File: {pkl_path}"
         )
 
@@ -112,18 +106,24 @@ def convert_pkl_to_arrays(
     fps: int = int(data["fps"])
     dt = 1.0 / fps
 
+    fk_extractor = extractor or MotionFkExtractor()
+    expected_body_names = _get_body_names_from_extractor(fk_extractor)
+    num_actions = fk_extractor.num_actions
+
     root_pos = np.asarray(data["root_pos"], dtype=np.float32)  # (T, 3)
     root_rot_xyzw = np.asarray(data["root_rot"], dtype=np.float32)  # (T, 4) xyzw
-    dof_pos = np.asarray(data["dof_pos"], dtype=np.float32)  # (T, 29)
+    dof_pos = np.asarray(data["dof_pos"], dtype=np.float32)  # (T, num_actions)
     body_names: list[str] = list(data["link_body_list"])
-    _validate_required_bodies(body_names, pkl_path)
+    _validate_required_bodies(body_names, expected_body_names, pkl_path)
 
     if root_pos.ndim != 2 or root_pos.shape[1] != 3:
         raise ValueError(f"root_pos must be (T,3), got {root_pos.shape} in {pkl_path}")
     if root_rot_xyzw.ndim != 2 or root_rot_xyzw.shape[1] != 4:
         raise ValueError(f"root_rot must be (T,4), got {root_rot_xyzw.shape} in {pkl_path}")
-    if dof_pos.ndim != 2:
-        raise ValueError(f"dof_pos must be 2D, got {dof_pos.shape} in {pkl_path}")
+    if dof_pos.ndim != 2 or dof_pos.shape[1] != num_actions:
+        raise ValueError(
+            f"dof_pos must be (T,{num_actions}), got {dof_pos.shape} in {pkl_path}"
+        )
     if not (root_pos.shape[0] == root_rot_xyzw.shape[0] == dof_pos.shape[0]):
         raise ValueError(
             f"root_pos/root_rot/dof_pos time dimensions mismatch in {pkl_path}: "
@@ -136,12 +136,11 @@ def convert_pkl_to_arrays(
     # Convert root quaternion: xyzw -> wxyz
     root_rot_wxyz = normalize_quaternion(quat_xyzw_to_wxyz(root_rot_xyzw))
 
-    fk_extractor = extractor or MotionFkExtractor()
     body_pos_w, body_quat_w = fk_extractor.extract(
         root_pos,
         root_rot_wxyz,
         dof_pos,
-        _MJLAB_G1_BODY_NAMES,
+        expected_body_names,
     )
     body_lin_vel_w, body_ang_vel_w = compute_body_velocities(body_pos_w, body_quat_w, dt)
     _validate_fk_outputs(body_quat_w, body_ang_vel_w, pkl_path)
@@ -154,11 +153,15 @@ def convert_pkl_to_arrays(
         "body_quat_w": body_quat_w.astype(np.float32),
         "body_lin_vel_w": body_lin_vel_w,
         "body_ang_vel_w": body_ang_vel_w,
-        "body_names": np.array(_MJLAB_G1_BODY_NAMES, dtype=str),
+        "body_names": np.array(expected_body_names, dtype=str),
     }
 
 
-def convert_seed_csv_to_pkl_arrays(csv_path: str) -> dict[str, Any]:
+def convert_seed_csv_to_pkl_arrays(
+    csv_path: str,
+    *,
+    extractor: MotionFkExtractor | None = None,
+) -> dict[str, Any]:
     """Convert a SEED CSV motion file to a PKL-compatible dict.
 
     SEED CSV format (120 fps):
@@ -169,6 +172,9 @@ def convert_seed_csv_to_pkl_arrays(csv_path: str) -> dict[str, Any]:
         fps, root_pos (m), root_rot (xyzw quat), dof_pos (rad), link_body_list.
     """
     from scipy.spatial.transform import Rotation
+
+    fk_extractor = extractor or MotionFkExtractor()
+    expected_body_names = _get_body_names_from_extractor(fk_extractor)
 
     data = np.loadtxt(csv_path, delimiter=",", skiprows=1, dtype=np.float64)
     if data.ndim == 1:
@@ -198,7 +204,7 @@ def convert_seed_csv_to_pkl_arrays(csv_path: str) -> dict[str, Any]:
         "root_pos": root_pos.astype(np.float64),
         "root_rot": root_rot_xyzw.astype(np.float64),
         "dof_pos": dof_pos.astype(np.float64),
-        "link_body_list": list(_MJLAB_G1_BODY_NAMES),
+        "link_body_list": list(expected_body_names),
     }
 
 
@@ -208,7 +214,10 @@ def convert_seed_csv_to_arrays(
     extractor: MotionFkExtractor | None = None,
 ) -> dict[str, Any]:
     """Convert a SEED CSV motion file to NPZ-ready arrays (same output as convert_pkl_to_arrays)."""
-    pkl_dict = convert_seed_csv_to_pkl_arrays(csv_path)
+    fk_extractor = extractor or MotionFkExtractor()
+    expected_body_names = _get_body_names_from_extractor(fk_extractor)
+
+    pkl_dict = convert_seed_csv_to_pkl_arrays(csv_path, extractor=fk_extractor)
 
     fps: int = int(pkl_dict["fps"])
     dt = 1.0 / fps
@@ -220,9 +229,8 @@ def convert_seed_csv_to_arrays(
     joint_vel = np.gradient(dof_pos, dt, axis=0).astype(np.float32)
     root_rot_wxyz = normalize_quaternion(quat_xyzw_to_wxyz(root_rot_xyzw))
 
-    fk_extractor = extractor or MotionFkExtractor()
     body_pos_w, body_quat_w = fk_extractor.extract(
-        root_pos, root_rot_wxyz, dof_pos, _MJLAB_G1_BODY_NAMES,
+        root_pos, root_rot_wxyz, dof_pos, expected_body_names,
     )
     body_lin_vel_w, body_ang_vel_w = compute_body_velocities(body_pos_w, body_quat_w, dt)
     _validate_fk_outputs(body_quat_w, body_ang_vel_w, csv_path)
@@ -235,7 +243,7 @@ def convert_seed_csv_to_arrays(
         "body_quat_w": body_quat_w.astype(np.float32),
         "body_lin_vel_w": body_lin_vel_w,
         "body_ang_vel_w": body_ang_vel_w,
-        "body_names": np.array(_MJLAB_G1_BODY_NAMES, dtype=str),
+        "body_names": np.array(expected_body_names, dtype=str),
     }
 
 
