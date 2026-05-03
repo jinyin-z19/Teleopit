@@ -95,10 +95,16 @@
 - `num_actions: 30`
 - `base_body: "base_link"`、`anchor_body_name: "base_link"`
 - `xml_path` 指向 `azureloong_v9_mjlab.xml`
-- PD 增益、默认角度、动作缩放、力矩限制等（估计默认值）
-- `mujoco_default_qpos` — 37 维（7 自由基座 + 30 关节）
+- PD 增益、动作缩放、力矩限制等（估计默认值）
+- `default_angles` — 必须与训练 HOME_KEYFRAME 一致（弯膝姿态）：hip_pitch=-0.1, knee=0.3, ankle_pitch=-0.2, arm_02=0.2, arm_04=1.0
+- `mujoco_default_qpos` — 37 维：root z=1.10 + identity quat + 弯膝关节角度
+- `ankle_idx: [22, 23, 28, 29]`（脚踝 pitch+roll，非 G1 的索引）
+- **注意**：身高 z=1.10（非 G1 的 0.76），AzureLoong V9 XML 默认直立场高度 1.25m
 
-**理由**：sim2sim 管线通过 Hydra 配置驱动，需要独立的机器人 yaml。
+**理由**：
+- sim2sim 的 `get_target_dof_pos()` 计算 `target = clip(action) * scale + default_dof_pos`，若 `default_angles` 全 0，PD 目标会错误地指向 0 关节姿态，导致机器人崩溃
+- `mujoco_default_qpos` 的关节部分必须包含弯膝角度，否则 reset 到直腿姿态与训练不一致
+- **首次创建时这两个值均为全 0（bug），后续已修复**
 
 ---
 
@@ -161,6 +167,15 @@ python train_mimic/scripts/train.py \
     --motion_file data/datasets/lafan1_v1/train \
     --gpu_ids 0 1 2 3
 
+# 带录像的小批量训练（调试用，不弹窗口，仅存 MP4）
+python train_mimic/scripts/train.py \
+    --task azureloong_v9 \
+    --num_envs 16 \
+    --max_iterations 50 \
+    --motion_file data/datasets/lafan1_v1/train \
+    --video \
+    --video_interval 10
+
 # 续训
 python train_mimic/scripts/train.py \
     --task azureloong_v9 \
@@ -172,13 +187,21 @@ python train_mimic/scripts/train.py \
 ### Play（checkpoint 回放评估）
 
 ```bash
-# 评估训练好的 checkpoint
+# MuJoCo 原生窗口实时观看（推荐调试用）
 python train_mimic/scripts/play.py \
     --task azureloong_v9 \
-    --checkpoint logs/rsl_rl/azureloong_v9_general_tracking/<run>/model_6000.pt \
+    --checkpoint logs/rsl_rl/azureloong_v9_general_tracking/<run>/model_100.pt \
     --motion_file data/datasets/lafan1_v1/val \
     --num_envs 1 \
-    --device cpu
+    --viewer native
+
+# 浏览器观看
+python train_mimic/scripts/play.py \
+    --task azureloong_v9 \
+    --checkpoint logs/rsl_rl/azureloong_v9_general_tracking/<run>/model_100.pt \
+    --motion_file data/datasets/lafan1_v1/val \
+    --num_envs 1 \
+    --viewer viser
 ```
 
 ### 导出 ONNX
@@ -234,3 +257,4 @@ python scripts/run/run_sim.py \
 2. **碰撞几何较少**：`azureloong_v9_mjlab.xml` 仅包含 `base_link_collision` 和脚踝碰撞几何，缺少足部和身体碰撞。可能影响 sim2sim 的物理真实性。
 3. **观测维度差异**：AzureLoong V9 的 velcmd_history 观测维度约为 169D（vs G1 的 166D），使用 `obs_normalization=True` 自适应。
 4. **Sim2Sim viewer 足部名称**：`_start_robot_viewer` 默认使用 G1 的足部名称 (`left_ankle_roll_link`)，对 AzureLoong V9 使用时应传 `left_foot_name="link_ankle_l_roll"`。
+5. **训练无可视化窗口**：仅支持 `--video` 录像。调试建议先训练少量迭代再用 `play.py --viewer native` 实时观看。
