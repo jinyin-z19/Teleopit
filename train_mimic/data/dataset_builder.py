@@ -806,15 +806,23 @@ def run_sample_fk_checks(
     *,
     sample_clips_per_source: int = DEFAULT_FK_SAMPLE_CLIPS,
     sample_frames: int = DEFAULT_FK_SAMPLE_FRAMES,
+    source_xml_map: dict[str, str] | None = None,
 ) -> list[FkCheckSummary]:
     summaries: list[FkCheckSummary] = []
     by_source: dict[str, list[DatasetClipRow]] = {}
     for row in rows:
         by_source.setdefault(row.source, []).append(row)
 
+    xml_map = source_xml_map or {}
+
     for source, source_rows in sorted(by_source.items()):
+        model_path = xml_map.get(source)
         for row in sorted(source_rows, key=lambda item: item.clip_id)[:sample_clips_per_source]:
-            stats = compute_npz_fk_consistency(row.resolved_npz_path, sample_count=sample_frames)
+            stats = compute_npz_fk_consistency(
+                row.resolved_npz_path,
+                model_path=model_path,
+                sample_count=sample_frames,
+            )
             if stats.pos_max > 1e-3 or stats.quat_mean > 0.05 or stats.quat_p95 > 0.10:
                 raise ValueError(
                     f"FK consistency check failed for {row.clip_id}: "
@@ -1322,9 +1330,14 @@ def build_dataset_from_spec(
     convert_sources_to_npz(spec, paths=paths, force=force, jobs=jobs)
     rows = collect_clip_rows(spec, paths=paths)
 
+    # Build source→XML mapping for FK consistency checks.
+    source_xml_map: dict[str, str] = {}
+    for src in spec.sources:
+        source_xml_map[src.name] = str(mocap_xml_path(PROJECT_ROOT, src.robot_name))
+
     fk_checks: list[FkCheckSummary] = []
     if not skip_fk_check:
-        fk_checks = run_sample_fk_checks(rows)
+        fk_checks = run_sample_fk_checks(rows, source_xml_map=source_xml_map)
 
     train_rows = [row for row in rows if row.resolved_split == "train"]
     val_rows = [row for row in rows if row.resolved_split == "val"]

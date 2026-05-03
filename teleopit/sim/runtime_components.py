@@ -202,10 +202,11 @@ class PolicyStepRunner:
         self._pending_reference_qpos = reference_qpos.copy()
 
         if self.last_retarget_qpos is None and self.qpos_interpolator.duration > 0:
-            start_qpos = np.zeros(36, dtype=np.float64)
+            nq = 7 + self.num_actions  # 7D root (pos+quat) + joint DOFs
+            start_qpos = np.zeros(nq, dtype=np.float64)
             start_qpos[0:3] = np.asarray(state.base_pos[:3], dtype=np.float64)
             start_qpos[3:7] = np.asarray(state.quat[:4], dtype=np.float64)
-            start_qpos[7:36] = np.asarray(state.qpos[:29], dtype=np.float64)
+            start_qpos[7:nq] = np.asarray(state.qpos[:self.num_actions], dtype=np.float64)
             self.qpos_interpolator.start(start_qpos)
         qpos = self.qpos_interpolator.apply(reference_qpos)
 

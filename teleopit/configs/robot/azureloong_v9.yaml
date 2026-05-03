@@ -1,0 +1,69 @@
+# AzureLoong V9 robot configuration.
+# DOF count: 30 (31 bodies + world)
+
+num_actions: 30
+
+# PD gains (estimated defaults; tune with real hardware specs)
+kps: [50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
+      50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
+      20.0, 20.0,
+      50.0, 50.0,
+      100.0, 100.0, 100.0, 100.0, 20.0, 20.0,
+      100.0, 100.0, 100.0, 100.0, 20.0, 20.0]
+
+kds: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0,
+      3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0,
+      1.2, 1.2,
+      3.0, 3.0,
+      6.0, 6.0, 6.0, 6.0, 1.2, 1.2,
+      6.0, 6.0, 6.0, 6.0, 1.2, 1.2]
+
+# Default standing pose (all zeros = model default)
+default_angles: [0, 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0, 0,
+                 0, 0,
+                 0, 0,
+                 0, 0, 0, 0, 0, 0,
+                 0, 0, 0, 0, 0, 0]
+
+action_scale: [0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
+               0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
+               0.25, 0.25,
+               0.25, 0.25,
+               0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
+               0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
+
+torque_limits: [50, 50, 50, 50, 50, 50, 50,
+                50, 50, 50, 50, 50, 50, 50,
+                15, 15,
+                50, 50,
+                100, 100, 100, 100, 15, 15,
+                100, 100, 100, 100, 15, 15]
+
+sim_dt: 0.005
+
+solver: "newton"
+integrator: "implicitfast"
+solver_iterations: 10
+ls_iterations: 20
+
+builtin_pd: true
+
+xml_path: "teleopit/retargeting/gmr/assets/azureloong_v9/azureloong_v9_mjlab.xml"
+base_body: "base_link"
+anchor_body_name: "base_link"
+
+ang_vel_scale: 0.25
+dof_pos_scale: 1.0
+dof_vel_scale: 0.05
+# Ankle roll joint indices in action space (for termination checks, etc.)
+ankle_idx: [24, 29]
+
+mujoco_default_qpos: [0, 0, 1.10,
+                      1, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0,
+                      0, 0,
+                      0, 0,
+                      0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0]

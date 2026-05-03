@@ -31,6 +31,10 @@
   - 原因：根据机器人名从 `ROBOT_BASE_DICT`/`ROBOT_FOOT_NAMES_DICT` 获取预处理默认 body 名称
 - **`load_dataset_spec()`**: 从第一个 source 提取 `robot_name` 并传入预处理
   - 原因：使 YAML 配置中的 `robot_name` 能自动影响预处理参数
+- **`run_sample_fk_checks()`**: 新增 `source_xml_map` 参数，传递每 source 的 MuJoCo XML 路径
+  - 原因：FK 一致性检查需要正确的机器人模型（不同机器人 body 数/名不同），之前默认用 G1 模型会导致 azureloong_v9 报错
+- **`build_dataset_from_spec()`**: 构建 `source_xml_map` 并传给 `run_sample_fk_checks()`
+  - 原因：为每个 source 解析对应的机器人 XML 路径
 
 ### 3. `train_mimic/scripts/convert_pkl_to_npz.py`
 
@@ -47,8 +51,10 @@
 
 ### 4. `train_mimic/data/motion_fk.py`
 
-- **`compute_npz_fk_consistency()`**: 根 body 名称从 `model.body(1).name` 获取，不再硬编码 `"pelvis"`
-  - 原因：azureloong_v9 的根 body 是 `base_link`，不是 `pelvis`
+- **`compute_npz_fk_consistency()`**: 根 body 从 NPZ 自身 `body_names[0]` 获取，不再从模型反查
+  - 原因：多机器人场景下模型根 body 名不同（azureloong_v9=`base_link`, G1=`pelvis`），从 NPZ 自省更可靠；root 始终在 NPZ body index 0
+- **`compute_npz_fk_consistency()`**: extractor 放在 body_names 解析之后创建
+  - 原因：先确定 root body，再创建 FK extractor 做一致性校验
 
 ### 5. `train_mimic/data/dataset_lib.py`
 

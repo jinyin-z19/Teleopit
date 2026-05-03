@@ -34,7 +34,7 @@ def _slerp(q0: NDArray, q1: NDArray, t: float) -> NDArray:
 class QposInterpolator:
     """Smoothly interpolates retargeted qpos from a start pose to the live target.
 
-    Operates on 36D qpos: pos(3) + quat_wxyz(4) + joints(29).
+    Operates on N-D qpos: pos(3) + quat_wxyz(4) + joints(N_joints).
     Position and joints use linear interpolation; quaternion uses SLERP.
 
     Parameters

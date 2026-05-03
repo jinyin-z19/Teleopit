@@ -66,6 +66,7 @@ def _robot_viewer_proc(
     title: str = "",
     win_x: int = -1,
     win_y: int = -1,
+    lookat_body_name: str = "",
 ) -> None:
     """Subprocess: robot model viewer — displays qpos with optional foot Z fix.
 
@@ -95,10 +96,19 @@ def _robot_viewer_proc(
         right_foot_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, right_foot_name)
 
     pelvis_id = -1
-    try:
-        pelvis_id = model.body("pelvis").id
-    except Exception:
-        pass
+    if lookat_body_name:
+        try:
+            pelvis_id = model.body(lookat_body_name).id
+        except Exception:
+            pass
+    if pelvis_id < 0:
+        # Fallback: try common root body names
+        for candidate in ("base_link", "pelvis", "torso_link", "trunk"):
+            try:
+                pelvis_id = model.body(candidate).id
+                break
+            except Exception:
+                continue
 
     # Set initial window position via GLFW hints (GLFW 3.4+)
     if win_x >= 0 and win_y >= 0:
@@ -212,6 +222,9 @@ def _mocap_viewer_proc(
 def _start_robot_viewer(
     xml_path: str, nq: int, foot_z_correction: bool,
     title: str = "", win_x: int = -1, win_y: int = -1,
+    left_foot_name: str = "left_ankle_roll_link",
+    right_foot_name: str = "right_ankle_roll_link",
+    lookat_body_name: str = "pelvis",
 ) -> tuple[mp.Process, mp.Array, mp.Value, mp.Event]:
     """Launch a subprocess viewer for a robot model.
 
@@ -223,8 +236,8 @@ def _start_robot_viewer(
     proc = mp.Process(
         target=_robot_viewer_proc,
         args=(xml_path, arr, nq, shutdown, alive,
-              foot_z_correction, "left_ankle_roll_link", "right_ankle_roll_link",
-              title, win_x, win_y),
+              foot_z_correction, left_foot_name, right_foot_name,
+              title, win_x, win_y, lookat_body_name),
         daemon=True,
     )
     proc.start()

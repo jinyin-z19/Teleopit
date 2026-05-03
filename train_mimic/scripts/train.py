@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
-"""Train G1 whole-body tracking policy with mjlab + rsl_rl PPO.
+"""Train whole-body tracking policy with mjlab + rsl_rl PPO.
+
+Supported tasks: General-Tracking-G1, General-Tracking-AzureloongV9.
+Shortcuts: --task g1 | --task azureloong_v9
 
 Usage:
+    # G1 training
     python train_mimic/scripts/train.py \
         --num_envs 4096 --max_iterations 18000 \
         --motion_file data/datasets/twist2_full/train
 
-    # Quick verification
+    # AzureLoong V9 training
+    python train_mimic/scripts/train.py \
+        --task azureloong_v9 \
+        --num_envs 64 --max_iterations 100 \
+        --motion_file data/datasets/lafan1_v1/train
+
+    # Quick verification (G1)
     python train_mimic/scripts/train.py \
         --num_envs 64 --max_iterations 100 \
         --motion_file data/datasets/twist2_full/train
@@ -47,7 +57,7 @@ from train_mimic.tasks.tracking.config.constants import DEFAULT_TRAIN_MOTION_FIL
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train G1 tracking policy (mjlab).")
+    parser = argparse.ArgumentParser(description="Train whole-body tracking policy (mjlab).")
     parser.add_argument("--num_envs", type=int, default=None)
     parser.add_argument(
         "--max_iterations",

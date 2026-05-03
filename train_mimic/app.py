@@ -13,6 +13,13 @@ from train_mimic.tasks.tracking.config.constants import (
 )
 
 DEFAULT_TASK = GENERAL_TRACKING_TASK
+_MAPPED_TASK_IDS = {
+    "General-Tracking-G1": GENERAL_TRACKING_TASK,
+    "General-Tracking-AzureloongV9": "General-Tracking-AzureloongV9",
+    "g1": GENERAL_TRACKING_TASK,
+    "azureloong_v9": "General-Tracking-AzureloongV9",
+    "azureloong": "General-Tracking-AzureloongV9",
+}
 
 
 def validate_motion_file(motion_file: str) -> None:
@@ -54,6 +61,20 @@ def import_training_stack() -> tuple[Any, ...]:
     )
 
 
+def _resolve_task_name(task_name: str) -> str:
+    """Resolve task alias to canonical task id."""
+    if task_name in SUPPORTED_TASKS:
+        return task_name
+    mapped = _MAPPED_TASK_IDS.get(task_name)
+    if mapped is not None and mapped in SUPPORTED_TASKS:
+        return mapped
+    raise ValueError(
+        f"Unsupported task '{task_name}'."
+        f" Supported tasks: {', '.join(SUPPORTED_TASKS)}."
+        f" Aliases: {', '.join(k for k in _MAPPED_TASK_IDS if k not in SUPPORTED_TASKS)}."
+    )
+
+
 def load_task_components(
     task_name: str = DEFAULT_TASK,
     *,
@@ -73,10 +94,7 @@ def load_task_components(
             load_runner_cls,
             _configure_torch_backends,
         ) = import_training_stack()
-    if task_name not in SUPPORTED_TASKS:
-        raise ValueError(
-            f"Unsupported task '{task_name}'. Supported tasks: {', '.join(SUPPORTED_TASKS)}."
-        )
+    task_name = _resolve_task_name(task_name)
     env_cfg = load_env_cfg(task_name, play=play)
     agent_cfg = load_rl_cfg(task_name)
     runner_cls = load_runner_cls(task_name)
