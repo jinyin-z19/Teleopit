@@ -4,6 +4,18 @@
 num_actions: 30
 robot_name: azureloong_v9
 
+# ==============================================================================
+# Joint order (30 DOF, all arrays follow this order):
+#   [ 0- 6] J_arm_l_01 .. J_arm_l_07    (left arm, 7 joints)
+#   [ 7-13] J_arm_r_01 .. J_arm_r_07    (right arm, 7 joints)
+#   [14-15] J_head_yaw, J_head_pitch    (head, 2 joints)
+#   [16-17] J_waist_roll, J_waist_yaw   (waist, 2 joints)
+#   [18-23] J_hip_l_pitch, J_hip_l_roll, J_hip_l_yaw,
+#           J_knee_l_pitch, J_ankle_l_pitch, J_ankle_l_roll  (left leg, 6)
+#   [24-29] J_hip_r_pitch, J_hip_r_roll, J_hip_r_yaw,
+#           J_knee_r_pitch, J_ankle_r_pitch, J_ankle_r_roll  (right leg, 6)
+# ==============================================================================
+
 # PD gains — arms/head/waist estimated defaults; legs from hardware reference
 kps: [50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
       50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
@@ -20,7 +32,6 @@ kds: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0,
       1.0, 1.0, 0.5, 4.0, 1.0, 1.0]
 
 # Default standing pose — bent knees, arms 45° outward
-# Joint order: arm_l(7) arm_r(7) head(2) waist(2) leg_l(6) leg_r(6)
 default_angles: [0.0, 0.785, 0.0, 0.0, 0.0, 0.0, 0.0,
                  0.0, -0.785, 0.0, 0.0, 0.0, 0.0, 0.0,
                  0.0, 0.0,
@@ -35,12 +46,18 @@ action_scale: [0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
                0.25, 0.25, 0.25, 0.25, 0.25, 0.25,
                0.25, 0.25, 0.25, 0.25, 0.25, 0.25]
 
-torque_limits: [50, 50, 50, 50, 50, 50, 50,
-                50, 50, 50, 50, 50, 50, 50,
-                15, 15,
-                50, 50,
-                100, 100, 100, 100, 15, 15,
-                100, 100, 100, 100, 15, 15]
+# Torque limits (N·m) — from OpenLoong hardware spec
+# arm_l: 80, 80, 48, 48, 12.4, 12.4, 12.4
+# arm_r: 80, 80, 48, 48, 12.4, 12.4, 12.4
+# head: 26, 26  |  waist: 315, 121
+# leg_l: 396, 320, 160, 396, 58.5, 58.5
+# leg_r: 396, 320, 160, 396, 58.5, 58.5
+torque_limits: [80, 80, 48, 48, 12.4, 12.4, 12.4,
+                80, 80, 48, 48, 12.4, 12.4, 12.4,
+                26, 26,
+                315, 121,
+                396, 320, 160, 396, 58.5, 58.5,
+                396, 320, 160, 396, 58.5, 58.5]
 
 sim_dt: 0.005
 
