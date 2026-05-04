@@ -37,27 +37,11 @@ def get_spec() -> mujoco.MjSpec:
 # Actuator config.
 ##
 
-# Estimated actuator specs. These are reasonable defaults for a humanoid robot.
-# Joint naming convention for azureloong_v9:
-#   Arms:  J_arm_l_0[1-7], J_arm_r_0[1-7]  (7 DOF each)
-#   Head:  J_head_yaw, J_head_pitch
-#   Waist: J_waist_roll, J_waist_yaw
-#   Legs:  J_hip_[lr]_(pitch|roll|yaw), J_knee_[lr]_pitch,
-#          J_ankle_[lr]_(pitch|roll)  (6 DOF each leg)
-
-# Use default actuator properties:
-#   MEDIUM: for most arm/waist joints
-#   LARGE:  for hip/knee joints (higher load)
-#   SMALL:  for ankle/head/wrist joints
+# Arm / head / waist actuators: computed from motor specs via natural-frequency PD.
 _MEDIUM = ElectricActuator(
     reflected_inertia=0.01,
     velocity_limit=20.0,
     effort_limit=50.0,
-)
-_LARGE = ElectricActuator(
-    reflected_inertia=0.03,
-    velocity_limit=15.0,
-    effort_limit=100.0,
 )
 _SMALL = ElectricActuator(
     reflected_inertia=0.003,
@@ -86,63 +70,67 @@ def _make_actuator(
     )
 
 
+def _make_explicit_actuator(
+    names_expr: tuple[str, ...],
+    stiffness: float,
+    damping: float,
+    effort_limit: float,
+) -> BuiltinPositionActuatorCfg:
+    """Create a BuiltinPositionActuatorCfg with explicit PD gains."""
+    return BuiltinPositionActuatorCfg(
+        target_names_expr=names_expr,
+        stiffness=stiffness,
+        damping=damping,
+        effort_limit=effort_limit,
+        armature=stiffness / NATURAL_FREQ**2,
+    )
+
+
 # Arm joints: J_arm_l_01 through J_arm_l_07 (same for right)
 ARM_JOINT_NAMES_L = tuple(f"J_arm_l_0{i}" for i in range(1, 8))
 ARM_JOINT_NAMES_R = tuple(f"J_arm_r_0{i}" for i in range(1, 8))
 
-# Leg joints
-LEG_JOINT_NAMES = (
-    "J_hip_l_pitch",
-    "J_hip_l_roll",
-    "J_hip_l_yaw",
-    "J_knee_l_pitch",
-    "J_hip_r_pitch",
-    "J_hip_r_roll",
-    "J_hip_r_yaw",
-    "J_knee_r_pitch",
-)
-
-# Ankle joints
-ANKLE_JOINT_NAMES = (
-    "J_ankle_l_pitch",
-    "J_ankle_l_roll",
-    "J_ankle_r_pitch",
-    "J_ankle_r_roll",
-)
-
 # Waist joints
 WAIST_JOINT_NAMES = ("J_waist_roll", "J_waist_yaw")
 
-# Head joints (not actuated in G1 either, but present in model)
+# Head joints
 HEAD_JOINT_NAMES = ("J_head_yaw", "J_head_pitch")
 
 AZURELOONG_V9_ACTUATOR_ARM_L = _make_actuator(ARM_JOINT_NAMES_L, _MEDIUM)
 AZURELOONG_V9_ACTUATOR_ARM_R = _make_actuator(ARM_JOINT_NAMES_R, _MEDIUM)
-AZURELOONG_V9_ACTUATOR_LEG = _make_actuator(LEG_JOINT_NAMES, _LARGE)
-AZURELOONG_V9_ACTUATOR_ANKLE = _make_actuator(ANKLE_JOINT_NAMES, _SMALL)
 AZURELOONG_V9_ACTUATOR_WAIST = _make_actuator(WAIST_JOINT_NAMES, _MEDIUM)
 AZURELOONG_V9_ACTUATOR_HEAD = _make_actuator(HEAD_JOINT_NAMES, _SMALL)
+
+# Leg actuators: per-joint explicit stiffness/damping from hardware reference.
+# Reference values (stiffness, damping, effort_limit):
+#   hip_roll:    (300, 1.0, 100)   hip_yaw:   (200, 0.5, 100)
+#   hip_pitch:   (200, 1.0, 100)   knee:      (400, 4.0, 100)
+#   ankle_pitch: (120, 1.0,  15)   ankle_roll:(120, 1.0,  15)
+AZURELOONG_V9_ACTUATOR_HIP_ROLL = _make_explicit_actuator(
+    ("J_hip_l_roll", "J_hip_r_roll"), 300.0, 1.0, 100.0,
+)
+AZURELOONG_V9_ACTUATOR_HIP_YAW = _make_explicit_actuator(
+    ("J_hip_l_yaw", "J_hip_r_yaw"), 200.0, 0.5, 100.0,
+)
+AZURELOONG_V9_ACTUATOR_HIP_PITCH = _make_explicit_actuator(
+    ("J_hip_l_pitch", "J_hip_r_pitch"), 200.0, 1.0, 100.0,
+)
+AZURELOONG_V9_ACTUATOR_KNEE = _make_explicit_actuator(
+    ("J_knee_l_pitch", "J_knee_r_pitch"), 400.0, 4.0, 100.0,
+)
+AZURELOONG_V9_ACTUATOR_ANKLE = _make_explicit_actuator(
+    ("J_ankle_l_pitch", "J_ankle_l_roll", "J_ankle_r_pitch", "J_ankle_r_roll"),
+    120.0, 1.0, 15.0,
+)
 
 ##
 # Keyframe config.
 ##
 
-# Home standing pose for azureloong_v9: all zeros (default standing position).
-# The default qpos from the XML gives a standing pose at height 1.25.
+# Home standing pose for azureloong_v9: straight leg at XML default height 1.25m.
 HOME_KEYFRAME = EntityCfg.InitialStateCfg(
-    pos=(0, 0, 1.10),  # Slightly lower than default 1.25 for stability
-    joint_pos={
-        "J_hip_l_pitch": -0.1,
-        "J_knee_l_pitch": 0.3,
-        "J_ankle_l_pitch": -0.2,
-        "J_hip_r_pitch": -0.1,
-        "J_knee_r_pitch": 0.3,
-        "J_ankle_r_pitch": -0.2,
-        "J_arm_l_02": 0.2,
-        "J_arm_l_04": 1.0,
-        "J_arm_r_02": 0.2,
-        "J_arm_r_04": 1.0,
-    },
+    pos=(0, 0, 1.25),
+    joint_pos={},
     joint_vel={".*": 0.0},
 )
 
@@ -167,7 +155,10 @@ AZURELOONG_V9_ARTICULATION = EntityArticulationInfoCfg(
     actuators=(
         AZURELOONG_V9_ACTUATOR_ARM_L,
         AZURELOONG_V9_ACTUATOR_ARM_R,
-        AZURELOONG_V9_ACTUATOR_LEG,
+        AZURELOONG_V9_ACTUATOR_HIP_ROLL,
+        AZURELOONG_V9_ACTUATOR_HIP_YAW,
+        AZURELOONG_V9_ACTUATOR_HIP_PITCH,
+        AZURELOONG_V9_ACTUATOR_KNEE,
         AZURELOONG_V9_ACTUATOR_ANKLE,
         AZURELOONG_V9_ACTUATOR_WAIST,
         AZURELOONG_V9_ACTUATOR_HEAD,
