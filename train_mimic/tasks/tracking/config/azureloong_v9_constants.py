@@ -113,8 +113,8 @@ HOME_KEYFRAME = EntityCfg.InitialStateCfg(
 FULL_COLLISION = CollisionCfg(
     geom_names_expr=(".*_collision",),
     condim={"base_link_collision": 1, ".*_collision": 3},
-    priority={"link_ankle_.*_collision": 1},
-    friction={"link_ankle_.*_collision": (0.6,)},
+    priority={"link_ankle_.*_collision": 1, "link_arm_.*_collision": 1},
+    friction={"link_ankle_.*_collision": (0.6,), "link_arm_.*_collision": (0.6,)},
 )
 
 # ---------------------------------------------------------------------------
