@@ -80,8 +80,18 @@
 - 文档字符串改为通用描述（不再是 "Train G1 tracking policy"）
 - 新增 AzureLoong V9 使用示例
 - `argparse` 描述改为通用
+- 新增 `--save_interval` CLI 参数，可覆盖 task config 中的 `save_interval`（默认 2000）
 
-**理由**：不再硬编码 G1，支持多机器人训练入口。
+**用法**：
+```bash
+# 每 100 个 iteration 存一个 checkpoint
+python train_mimic/scripts/train.py \
+    --task azureloong_v9 \
+    --save_interval 100 \
+    ...
+```
+
+**理由**：不再硬编码 G1，支持多机器人训练入口；`--save_interval` 便于调试时高频保存 checkpoint。
 
 ---
 
@@ -153,11 +163,20 @@ python train_mimic/scripts/train.py \
     --motion_file data/datasets/lafan1_v1/train
 
 # 完整训练（4096 envs × 30000 iters，需 GPU）
+# 注意：--video 会强制每步渲染，严重拖慢训练速度（从 ~5-10s/iter 升至 ~50s/iter），仅调试用
 python train_mimic/scripts/train.py \
     --task azureloong_v9 \
     --num_envs 4096 \
     --max_iterations 30000 \
     --motion_file data/datasets/lafan1_v1/train
+
+# 高频 checkpoint（每 100 iter 保存，方便调试）
+python train_mimic/scripts/train.py \
+    --task azureloong_v9 \
+    --num_envs 4096 \
+    --max_iterations 10000 \
+    --motion_file data/datasets/lafan1_v1/train \
+    --save_interval 100
 
 # 多 GPU 训练
 python train_mimic/scripts/train.py \

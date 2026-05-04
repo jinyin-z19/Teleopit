@@ -111,6 +111,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
                         help="Record a video every N iterations (default: 2000)")
     parser.add_argument("--video_length", type=int, default=200,
                         help="Number of steps per video clip (default: 200)")
+    parser.add_argument("--save_interval", type=int, default=None,
+                        help="Save a checkpoint every N iterations (default: from task config)")
     return parser.parse_args(argv)
 
 
@@ -313,6 +315,8 @@ def _run_worker(args: argparse.Namespace) -> None:
         agent_cfg.max_iterations = args.max_iterations
     if args.experiment_name is not None:
         agent_cfg.experiment_name = args.experiment_name
+    if args.save_interval is not None:
+        agent_cfg.save_interval = args.save_interval
     if args.wandb_project is not None:
         agent_cfg.logger = "wandb"
         agent_cfg.wandb_project = args.wandb_project
