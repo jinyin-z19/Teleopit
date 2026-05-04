@@ -257,9 +257,10 @@ def _resolve_human_format(input_cfg: Any, input_provider: Any) -> str:
 
 
 
-def _build_retargeter(input_cfg: Any, input_provider: Any, retargeter_cls: type[Any]) -> Any:
+def _build_retargeter(input_cfg: Any, input_provider: Any, retargeter_cls: type[Any], robot_name: str | None = None) -> Any:
+    resolved_robot_name = robot_name or str(cfg_get(input_cfg, "robot_name", "unitree_g1"))
     return retargeter_cls(
-        robot_name=str(cfg_get(input_cfg, "robot_name", "unitree_g1")),
+        robot_name=resolved_robot_name,
         human_format=_resolve_human_format(input_cfg, input_provider),
         actual_human_height=float(cfg_get(input_cfg, "human_height", 1.75)),
     )
@@ -298,7 +299,8 @@ def build_inference_components(
         bvh_input_cls=bvh_input_cls,
         pico4_input_cls=pico4_input_cls,
     )
-    retargeter = _build_retargeter(input_cfg, input_provider, retargeter_cls)
+    retargeter = _build_retargeter(input_cfg, input_provider, retargeter_cls,
+                                    robot_name=str(cfg_get(robot_cfg, "robot_name", "")) or None)
     return InferenceComponents(
         robot=robot,
         controller=controller,
@@ -341,7 +343,8 @@ def build_sim2real_mocap_components(
         bvh_input_cls=bvh_input_cls,
         pico4_input_cls=pico4_input_cls,
     )
-    retargeter = _build_retargeter(input_cfg, input_provider, retargeter_cls)
+    retargeter = _build_retargeter(input_cfg, input_provider, retargeter_cls,
+                                    robot_name=str(cfg_get(robot_cfg, "robot_name", "")) or None)
     return MocapComponents(
         input_provider=input_provider,
         retargeter=retargeter,

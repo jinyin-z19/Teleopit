@@ -2,6 +2,7 @@
 # DOF count: 30 (31 bodies + world)
 
 num_actions: 30
+robot_name: azureloong_v9
 
 # PD gains — arms/head/waist estimated defaults; legs from hardware reference
 kps: [50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0,
@@ -50,7 +51,7 @@ ls_iterations: 20
 
 builtin_pd: true
 
-xml_path: "teleopit/retargeting/gmr/assets/azureloong_v9/azureloong_v9_mjlab.xml"
+xml_path: "teleopit/retargeting/gmr/assets/azureloong_v9/azureloong_v9.xml"
 base_body: "base_link"
 anchor_body_name: "base_link"
 

@@ -129,7 +129,7 @@ AZURELOONG_V9_ACTUATOR_ANKLE = _make_explicit_actuator(
 
 # Home standing pose for azureloong_v9: straight leg at XML default height 1.25m.
 HOME_KEYFRAME = EntityCfg.InitialStateCfg(
-    pos=(0, 0, 1.25),
+    pos=(0, 0, 1.10),
     joint_pos={},
     joint_vel={".*": 0.0},
 )

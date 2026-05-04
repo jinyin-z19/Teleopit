@@ -1,3 +1,4 @@
 bvh_file: ""  # must be provided explicitly for offline BVH input
 bvh_format: lafan1
 human_format: null
+robot_name: ""  # auto-inherited from robot config (robot.robot_name); set explicitly only to override

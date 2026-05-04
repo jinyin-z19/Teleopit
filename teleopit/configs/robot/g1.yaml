@@ -3,6 +3,7 @@
 # Do NOT copy from deploy.yaml (contains known waist_yaw scale error).
 
 num_actions: 29
+robot_name: unitree_g1
 # Inference uses the 166D velcmd_history observation path (General-Tracking-G1).
 
 kps: [40.2, 99.1, 40.2, 99.1, 28.5, 28.5,

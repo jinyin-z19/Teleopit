@@ -68,8 +68,8 @@ def extract_mimic_obs(
 ) -> NDArray[np.float32]:
     if qpos.ndim != 1:
         raise ValueError("qpos must be a 1D array")
-    if qpos.shape[0] < 36:
-        raise ValueError("qpos must contain 7D root + 29D joints")
+    if qpos.shape[0] < 10:
+        raise ValueError("qpos must contain 7D root + joints")
     if dt <= 0.0:
         raise ValueError("dt must be positive")
 
@@ -82,7 +82,7 @@ def extract_mimic_obs(
     last_root_pos = previous[0:3]
     root_quat = current[3:7]
     last_root_quat = previous[3:7]
-    joints = current[7:36]
+    joints = current[7:]
 
     base_vel_world = (root_pos - last_root_pos) / dt
     quat_delta: Float64Array = _quat_multiply(root_quat, _quat_conjugate(last_root_quat))
@@ -103,8 +103,9 @@ def extract_mimic_obs(
             joints,
         )
     )
-    if mimic_obs.shape[0] != 35:
-        raise ValueError(f"Expected 35D mimic obs, got {mimic_obs.shape[0]}")
+    expected_dim = 6 + joints.shape[0]  # 6 = lin_vel(2) + height(1) + euler(2) + ang_vel_yaw(1)
+    if mimic_obs.shape[0] != expected_dim:
+        raise ValueError(f"Expected {expected_dim}D mimic obs, got {mimic_obs.shape[0]}")
     return mimic_obs.astype(np.float32, copy=False)
 
 
