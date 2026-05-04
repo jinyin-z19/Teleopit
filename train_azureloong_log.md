@@ -195,9 +195,10 @@ python train_mimic/scripts/train.py \
     --video \
     --video_interval 10
 
-# 续训
+# 续训（--num_envs 必须与首训一致，否则 batch size / 梯度统计不匹配）
 python train_mimic/scripts/train.py \
     --task azureloong_v9 \
+    --num_envs 4096 \
     --resume logs/rsl_rl/azureloong_v9_general_tracking/<run>/model_6000.pt \
     --max_iterations 30000 \
     --motion_file data/datasets/lafan1_v1/train
