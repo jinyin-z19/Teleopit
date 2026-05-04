@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol, cast
 
+import mujoco
 import numpy as np
 from numpy.typing import NDArray
 
@@ -504,7 +506,7 @@ class ViewerManager:
         *,
         robot: Robot,
         viewers: set[str],
-        start_robot_viewer: Callable[[str, int, bool, str, int, int], tuple[mp.Process, mp.Array, mp.Value, mp.Event]],
+        start_robot_viewer: Callable[..., tuple[mp.Process, mp.Array, mp.Value, mp.Event]],
         mocap_viewer_proc: Callable[[list[int], mp.Array, int, mp.Event, mp.Value, int, int], None],
     ) -> None:
         self._robot = robot
@@ -522,27 +524,29 @@ class ViewerManager:
         if xml_path is None or model is None:
             return
 
+        # Detect foot/lookat body names from model (avoid G1 hardcode)
+        _body_names = [mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, i) or "" for i in range(model.nbody)]
+        _l_foot = next((n for n in _body_names if "ankle" in n.lower() and re.search(r"(_l_|left).*roll", n, re.I)), "left_ankle_roll_link")
+        _r_foot = next((n for n in _body_names if "ankle" in n.lower() and re.search(r"(_r_|right).*roll", n, re.I)), "right_ankle_roll_link")
+        _lookat = next((n for n in _body_names if n in ("base_link", "pelvis", "torso_link", "trunk")), "pelvis")
+
         nq = model.nq
         if "sim2sim" in self._viewers:
             wx, wy = win_positions["sim2sim"]
             self._sub_viewers["sim2sim"] = self._start_robot_viewer(
-                xml_path,
-                nq,
-                False,
-                "Sim2Sim",
-                wx,
-                wy,
+                xml_path, nq, False,
+                "Sim2Sim", wx, wy,
+                left_foot_name=_l_foot, right_foot_name=_r_foot,
+                lookat_body_name=_lookat,
             )
 
         if "retarget" in self._viewers:
             wx, wy = win_positions["retarget"]
             self._sub_viewers["retarget"] = self._start_robot_viewer(
-                xml_path,
-                nq,
-                True,
-                "Retarget",
-                wx,
-                wy,
+                xml_path, nq, True,
+                "Retarget", wx, wy,
+                left_foot_name=_l_foot, right_foot_name=_r_foot,
+                lookat_body_name=_lookat,
             )
 
     def has_viewers(self) -> bool:
