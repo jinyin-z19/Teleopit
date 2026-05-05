@@ -192,3 +192,96 @@ python -m pytest tests/test_dataset_v2.py tests/test_motion_fk.py -v --timeout=1
 # 运行完整测试套件
 python -m pytest tests/ -v --timeout=120
 ```
+
+
+## CMU (AMASS smplx) 数据集生成修复
+
+### 背景
+
+CMU 数据已通过 GMR retargeting 转换为 pkl 格式（30 DOF, 31 bodies），存放在 `data/CMU_Azureloong/`。
+但 `dataset_builder.py` 的 pkl 转换路径有两处硬编码使用 G1 FK 提取器，导致 azureloong_v9 pkl 文件转换失败。
+
+### 修复 (Round 1): 单文件转换路径 (PKL source 支持非 G1 机器人)
+
+**`train_mimic/data/dataset_builder.py`**:
+
+- **`_resolve_bvh_xml_path()`**: 断言从 `source.type == "bvh"` 改为 `source.type in ("bvh", "pkl")`
+  - 原因：pkl source 也需要根据 robot_name 解析 MuJoCo XML 路径
+- **`_resolve_bvh_xml_path()`**: 错误信息中的 "BVH conversion" 改为 "{source.type} conversion"
+- **`build_source_conversion_tasks()`**: `mocap_xml` 赋值的条件从 `if source.type == "bvh"` 改为 `if source.type in ("bvh", "pkl")`
+  - 原因：pkl source 的 ConversionTask 需要携带 mocap_xml，否则 `_convert_task` 拿不到
+- **`_convert_task()` (pkl 分支)**: `_get_fk_extractor()` 改为 `_get_fk_extractor(task.mocap_xml)`
+  - 原因：pkl 转换需要机器人专属 FK 提取器（body 名称不同），之前无条件使用 G1 提取器，导致 `_validate_required_bodies` 校验失败（azureloong_v9 pkl 缺少 G1 独有的 8 个 body，如 `pelvis`、`torso_link` 等）
+
+**`tests/test_dataset_v2.py`**:
+
+- **`_synthetic_motion_payload()`**: `MotionFkExtractor()` 改为 `MotionFkExtractor(ROBOT_XML_DICT["unitree_g1"])`
+  - 原因：pkl 文件由 GMR retargeting 生成，使用的是 `ROBOT_XML_DICT` 中的 XML（`g1_mocap_29dof.xml`，38 body），而非默认的 `g1_mjlab.xml`（30 body）。修复后 body 名称与 FK 提取器一致
+
+### 修复 (Round 2): 批次转换路径 (batch build 支持非 G1 机器人)
+
+**问题**：数据集构建有两条路径 —— 单文件转换（`_convert_task`）和批次转换（`_build_dataset_batch` → `_batch_convert_split` → `_batch_convert_chunk`）。pkl/seed_csv-only 数据集走批次路径，批次路径中 `_batch_convert_chunk` 也硬编码了 `MotionFkExtractor()`（默认 G1），导致同样报错 `body metadata missing required bodies`。
+
+**`train_mimic/data/dataset_builder.py`**:
+
+- **`_batch_convert_chunk()`**: 新增 `mocap_xml: str | None = None` 参数
+  - `MotionFkExtractor()` 改为 `MotionFkExtractor(mocap_xml) if mocap_xml else MotionFkExtractor()`
+  - 原因：批次 worker 需要正确的机器人 FK 提取器
+- **`_batch_convert_split()`**: 新增 `mocap_xml: str | None = None` 参数，透传给所有 `_batch_convert_chunk` 调用（单 worker、多 worker chunk_args、fallback 串行三条路径）
+  - chunk_args 类型注解：`tuple[...]` 末尾新增 `str | None`
+- **`_build_dataset_batch()`**: 在调用 `_batch_convert_split` 前构建 `source_xml_map` 并解析 `batch_mocap_xml`
+  - 校验所有 pkl/seed_csv source 使用同一机器人 XML（批次 worker 共享单一 FK 提取器）
+  - 传入 `mocap_xml=batch_mocap_xml` 到 train/val 两个 `_batch_convert_split` 调用
+
+**`tests/test_dataset_v2.py`**:
+
+- **`test_build_dataset_batch_manifest_skips_filtered_entries`**: mock `_batch_convert_split` 签名新增 `mocap_xml=None` 参数
+  - 原因：适配新增的参数
+
+### 新增文件
+
+- **`train_mimic/configs/datasets/CMU_v1.yaml`**: CMU AzureLoong 数据集配置
+  - `type: pkl`, `robot_name: azureloong_v9`, `target_fps: 30`
+  - preprocess 自动从 `ROBOT_BASE_DICT`/`ROBOT_FOOT_NAMES_DICT` 解析 `root_body_name=base_link`、`foot_body_names=(link_ankle_l_roll, link_ankle_r_roll)`
+
+
+## CMU 数据集生成 & 验证指令
+
+### 生成数据集
+
+```bash
+cd /workspace/Teleopit
+
+# 1980 个 PKL 文件, 推荐 --jobs 8
+python train_mimic/scripts/data/build_dataset.py \
+    --spec train_mimic/configs/datasets/CMU_v1.yaml
+
+# 如需重建
+python train_mimic/scripts/data/build_dataset.py \
+    --spec train_mimic/configs/datasets/CMU_v1.yaml \
+    --force
+```
+
+### 验证数据集
+
+```bash
+# 1. 检查数据集结构
+ls data/datasets/CMU_v1/
+# 应包含: build_info.json  manifest_resolved.csv  train/  val/
+
+# 2. 验证 NPZ 内容（DOF 数、body 名称）
+python -c "
+import numpy as np
+from pathlib import Path
+
+shard = Path('data/datasets/CMU_v1/train/shard_000.npz')
+data = np.load(shard, allow_pickle=True)
+
+print(f'joint_pos shape: {data[\"joint_pos\"].shape}')   # 期望: (N, 30)
+print(f'body_pos_w shape: {data[\"body_pos_w\"].shape}') # 期望: (N, 31, 3)
+print(f'DOF: {data[\"joint_pos\"].shape[1]}')            # 应为 30
+print(f'bodies: {data[\"body_pos_w\"].shape[1]}')        # 应为 31
+print(f'body_names[0]: {data[\"body_names\"][0]}')       # 应为 base_link
+print(f'fps: {int(data[\"fps\"])}')                      # 应为 30
+"
+```

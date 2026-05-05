@@ -35,8 +35,13 @@ pytestmark = [
 ]
 
 
+from teleopit.retargeting.gmr.params import ROBOT_XML_DICT
+
+
 def _synthetic_motion_payload() -> dict[str, object]:
-    extractor = MotionFkExtractor()
+    # Use the GMR retargeting XML (g1_mocap_29dof.xml) for body names, because
+    # real pkl files are produced by GMR retargeting which uses ROBOT_XML_DICT.
+    extractor = MotionFkExtractor(ROBOT_XML_DICT["unitree_g1"])
     body_names = _get_body_names_from_extractor(extractor)
 
     root_pos = np.asarray(
@@ -563,7 +568,7 @@ def test_build_dataset_batch_manifest_skips_filtered_entries(
             clip_weights=np.ones(len(lengths), dtype=np.float64),
         )
 
-    def _batch_convert_split(clips, target_fps, output_dir, jobs, split_name, preprocess):
+    def _batch_convert_split(clips, target_fps, output_dir, jobs, split_name, preprocess, mocap_xml=None):
         _ = clips, target_fps, jobs, preprocess
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)

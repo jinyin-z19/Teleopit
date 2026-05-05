@@ -351,10 +351,10 @@ def _ensure_not_dataset_root_npz_input(source: DatasetSourceSpec, input_path: Pa
 
 
 def _resolve_bvh_xml_path(source: DatasetSourceSpec) -> Path:
-    assert source.type == "bvh"
+    assert source.type in ("bvh", "pkl"), f"unsupported source type: {source.type}"
     xml_path = mocap_xml_path(PROJECT_ROOT, source.robot_name)
     if not xml_path.is_file():
-        raise FileNotFoundError(f"MuJoCo XML not found for BVH conversion: {xml_path}")
+        raise FileNotFoundError(f"MuJoCo XML not found for {source.type} conversion: {xml_path}")
     return xml_path
 
 
@@ -466,7 +466,7 @@ def build_source_conversion_tasks(
     items, _scan_root = _collect_source_files(source)
     output_map: dict[Path, SourceInputFile] = {}
     xml_path = None
-    if source.type == "bvh":
+    if source.type in ("bvh", "pkl"):
         xml_path = str(_resolve_bvh_xml_path(source))
     preprocess_spec = DatasetPreprocessSpec() if preprocess is None else preprocess
 
@@ -571,7 +571,7 @@ def _convert_task(task: ConversionTask) -> str:
             inspect_npz(output_path)
             return str(output_path)
 
-        extractor = _get_fk_extractor()
+        extractor = _get_fk_extractor(task.mocap_xml)
         if task.source_type == "pkl":
             convert_pkl_to_npz(str(input_path), str(output_path), extractor=extractor)
             _maybe_preprocess_npz_file(
@@ -897,6 +897,7 @@ def _batch_convert_chunk(
     output_path: str,
     label: str,
     preprocess: DatasetPreprocessSpec,
+    mocap_xml: str | None = None,
 ) -> dict[str, Any]:
     """Worker: convert a batch of PKL/seed_csv files and write one merged chunk NPZ.
 
@@ -905,7 +906,7 @@ def _batch_convert_chunk(
     from train_mimic.data.motion_fk import MotionFkExtractor
     from train_mimic.scripts.convert_pkl_to_npz import convert_pkl_to_arrays, convert_seed_csv_to_arrays
 
-    extractor = MotionFkExtractor()
+    extractor = MotionFkExtractor(mocap_xml) if mocap_xml else MotionFkExtractor()
     acc: dict[str, list[np.ndarray]] = {k: [] for k in _ARRAY_KEYS}
     clip_lengths: list[int] = []
     clip_weights: list[float] = []
@@ -1040,6 +1041,7 @@ def _batch_convert_split(
     jobs: int,
     split_name: str,
     preprocess: DatasetPreprocessSpec,
+    mocap_xml: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Convert clips for one split using parallel chunk workers."""
     if not clips:
@@ -1054,6 +1056,7 @@ def _batch_convert_split(
         shard_path = shard_output_path(output_dir, 0)
         stats = _batch_convert_chunk(
             file_paths, weights, target_fps, str(shard_path), split_name, preprocess,
+            mocap_xml=mocap_xml,
         )
         if int(stats["clips"]) <= 0:
             raise ValueError(f"no valid clips remain for split {split_name} after preprocessing")
@@ -1066,7 +1069,7 @@ def _batch_convert_split(
 
     # Split into chunks, one per worker
     chunk_size = (len(clips) + num_workers - 1) // num_workers
-    chunk_args: list[tuple[list[str], list[float], int, str, str, DatasetPreprocessSpec]] = []
+    chunk_args: list[tuple[list[str], list[float], int, str, str, DatasetPreprocessSpec, str | None]] = []
     for i in range(num_workers):
         start = i * chunk_size
         end = min(start + chunk_size, len(clips))
@@ -1080,6 +1083,7 @@ def _batch_convert_split(
             chunk_out,
             f"{split_name}[{i}]",
             preprocess,
+            mocap_xml,
         ))
 
     chunk_results: dict[str, dict[str, Any]] = {}
@@ -1108,6 +1112,7 @@ def _batch_convert_split(
             str(shard_path),
             split_name,
             preprocess,
+            mocap_xml=mocap_xml,
         )
         if int(stats["clips"]) <= 0:
             raise ValueError(f"no valid clips remain for split {split_name} after preprocessing")
@@ -1202,6 +1207,19 @@ def _build_dataset_batch(
     train_dir = split_output_dir(paths.dataset_dir, "train")
     val_dir = split_output_dir(paths.dataset_dir, "val")
 
+    # Resolve mocap_xml for FK extraction.  All pkl/seed_csv sources must
+    # use the same robot XML (batch workers share a single FK extractor).
+    source_xml_map: dict[str, str] = {}
+    for src in spec.sources:
+        source_xml_map[src.name] = str(mocap_xml_path(PROJECT_ROOT, src.robot_name))
+    unique_xmls = set(source_xml_map.values())
+    if len(unique_xmls) > 1:
+        raise ValueError(
+            f"batch build requires all sources to use the same robot XML, "
+            f"got {sorted(unique_xmls)}"
+        )
+    batch_mocap_xml = next(iter(unique_xmls)) if unique_xmls else None
+
     train_stats, train_shards = _batch_convert_split(
         [(e[0], e[3]) for e in train_entries],
         spec.target_fps,
@@ -1209,6 +1227,7 @@ def _build_dataset_batch(
         jobs,
         "train",
         spec.preprocess,
+        mocap_xml=batch_mocap_xml,
     )
     val_stats, val_shards = _batch_convert_split(
         [(e[0], e[3]) for e in val_entries],
@@ -1217,6 +1236,7 @@ def _build_dataset_batch(
         jobs,
         "val",
         spec.preprocess,
+        mocap_xml=batch_mocap_xml,
     )
 
     def _consume_entries_by_path(

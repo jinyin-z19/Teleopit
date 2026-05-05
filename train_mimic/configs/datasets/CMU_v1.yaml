@@ -1,0 +1,12 @@
+name: CMU_v1
+target_fps: 30
+val_percent: 5
+hash_salt: ""
+preprocess:
+  normalize_root_xy: true
+  ground_align: clip_min_foot
+sources:
+  - name: CMU_Azureloong
+    type: pkl
+    input: data/CMU_Azureloong
+    robot_name: azureloong_v9
