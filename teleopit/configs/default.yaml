@@ -16,6 +16,11 @@ playback:
   keyboard:
     enabled: false
 
+# ── Terrain height observation (propagated to controller config) ───
+# Set num_height_points > 0 and enable robot.terrain_height_scanner to
+# include terrain height features in the observation vector.
+# num_height_points: 25  # e.g. for 5×5 probe grid
+
 hydra:
   run:
     dir: .

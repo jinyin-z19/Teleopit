@@ -18,6 +18,7 @@ class RobotState:
     timestamp: float  # Timestamp in seconds
     base_pos: np.ndarray | None = None  # Base position in world frame
     base_lin_vel: np.ndarray | None = None  # Base linear velocity in body frame
+    terrain_heights: np.ndarray | None = None  # Terrain heights at probe points (world Z)
 
 
 @runtime_checkable

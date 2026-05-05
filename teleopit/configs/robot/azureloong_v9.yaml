@@ -87,3 +87,41 @@ mujoco_default_qpos: [0, 0, 1.10,
                       0.0, 0.0,
                       -0.3, 0.0, 0.0, 0.5, -0.2, 0.0,
                       -0.3, 0.0, 0.0, 0.5, -0.2, 0.0]
+
+# ── Terrain height scanner ─────────────────────────────────────────
+# Casts rays downward from probe points in the robot body frame
+# to sample terrain heights (world Z).  Enabled for sim2sim when
+# the scene XML contains hfield terrain geoms.
+terrain_height_scanner:
+  enabled: true
+  # Default 5x5 probe grid over +-0.4 m in robot body X/Y.
+  # Order: row-major over y (inner loop) x (outer loop).
+  probe_offsets:
+    - [-0.4, -0.4]
+    - [-0.4, -0.2]
+    - [-0.4,  0.0]
+    - [-0.4,  0.2]
+    - [-0.4,  0.4]
+    - [-0.2, -0.4]
+    - [-0.2, -0.2]
+    - [-0.2,  0.0]
+    - [-0.2,  0.2]
+    - [-0.2,  0.4]
+    - [ 0.0, -0.4]
+    - [ 0.0, -0.2]
+    - [ 0.0,  0.0]
+    - [ 0.0,  0.2]
+    - [ 0.0,  0.4]
+    - [ 0.2, -0.4]
+    - [ 0.2, -0.2]
+    - [ 0.2,  0.0]
+    - [ 0.2,  0.2]
+    - [ 0.2,  0.4]
+    - [ 0.4, -0.4]
+    - [ 0.4, -0.2]
+    - [ 0.4,  0.0]
+    - [ 0.4,  0.2]
+    - [ 0.4,  0.4]
+  ray_start_height: 1.0    # m above base from which rays start
+  ray_length: 5.0          # m max ray length downward
+  geom_group_filter: null   # if set, only hits geoms in this group

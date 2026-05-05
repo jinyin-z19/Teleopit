@@ -240,12 +240,22 @@ class _VelCmdBaseObservationBuilder:
 
 @final
 class VelCmdObservationBuilder:
-    """166D observation builder for the only supported VelCmdHistory policy."""
+    """VelCmdHistory observation builder for RL policy inference.
+
+    Builds the full observation vector:
+      base_obs (command + anchor_ori + ang_vel + joint_pos_rel + joint_vel + last_action)
+      + velcmd_obs (projected_gravity + ref lin/ang vel + ref projected_gravity)
+      + terrain_heights (if num_height_points > 0)
+
+    Total dimension = (num_actions * 5 + 9) + 12 + num_height_points.
+    The dimension is validated against the ONNX policy signature at startup.
+    """
 
     def __init__(self, cfg: ConfigType) -> None:
         self._base = _VelCmdBaseObservationBuilder(cfg)
         self.num_actions = self._base.num_actions
-        self.total_obs_size = self._base.total_obs_size + 12
+        self._num_height_points: int = int(_cfg_get(cfg, "num_height_points", 0))
+        self.total_obs_size = self._base.total_obs_size + 12 + self._num_height_points
 
     def reset(self) -> None:
         self._base.reset()
@@ -287,7 +297,29 @@ class VelCmdObservationBuilder:
             ref_base_ang_vel_b,
             ref_projected_gravity_b,
         ], dtype=np.float32)
-        obs = np.concatenate([base_obs, velcmd_obs], dtype=np.float32)
+
+        # ── Terrain height observation ────────────────────────────
+        terrain_heights = np.zeros(0, dtype=np.float32)
+        if self._num_height_points > 0:
+            if robot_state.terrain_heights is not None:
+                heights = np.asarray(robot_state.terrain_heights, dtype=np.float32).reshape(-1)
+                expected = self._num_height_points
+                if heights.shape[0] != expected:
+                    raise ValueError(
+                        f"Terrain height point count mismatch: "
+                        f"scanner produced {heights.shape[0]}, expected {expected}"
+                    )
+                terrain_heights = heights
+            else:
+                terrain_heights = np.zeros(self._num_height_points, dtype=np.float32)
+                _logger.warning(
+                    "Terrain height observation enabled (%d points) but no terrain_heights "
+                    "in RobotState. Using zeros. Set terrain_height_scanner.enabled=true in "
+                    "robot config.",
+                    self._num_height_points,
+                )
+
+        obs = np.concatenate([base_obs, velcmd_obs, terrain_heights], dtype=np.float32)
         if obs.shape[0] != self.total_obs_size:
             raise ValueError(f"Expected {self.total_obs_size}D velcmd observation, got {obs.shape[0]}")
         if not np.all(np.isfinite(obs)):

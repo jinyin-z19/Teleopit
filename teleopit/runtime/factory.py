@@ -131,6 +131,7 @@ def _build_obs_builder(robot_cfg: Any, controller_cfg: Any, sim_cfg: dict[str, o
         "joint_vel_history_steps": list(cfg_get(controller_cfg, "joint_vel_history_steps", [0, 1, 2, 3, 4, 8, 12, 16, 20])),
         "robot_joint_names": list(cfg_get(controller_cfg, "robot_joint_names", cfg_get(controller_cfg, "joint_names", []))),
         "target_joint_names": cfg_get(controller_cfg, "target_joint_names", None),
+        "num_height_points": int(cfg_get(controller_cfg, "num_height_points", 0)),
     }
     if observation_type == "velcmd_history":
         return VelCmdObservationBuilder(obs_cfg)

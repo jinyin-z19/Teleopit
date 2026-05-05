@@ -62,3 +62,17 @@ mujoco_default_qpos: [0, 0, 0.76,
                       0, 0, 0,
                       0.2, 0.2, 0, 0.6, 0, 0, 0,
                       0.2, -0.2, 0, 0.6, 0, 0, 0]
+
+# ── Terrain height scanner ─────────────────────────────────────────
+# Enabled: when true, MuJoCo ray casting scans terrain heights at
+# probe_offsets points (relative to robot base, body frame).
+# Ray direction: straight down (world -Z).
+terrain_height_scanner:
+  enabled: false
+  # probe_offsets: 2D (x, y) offsets in robot body frame (X-forward, Y-left).
+  # Defaults to a 5×5 grid spanning ±0.4 m if not specified.
+  # probe_offsets: [[-0.3, -0.2], [0.3, -0.2], [-0.3, 0.2], [0.3, 0.2],
+  #                 [-0.15, -0.3], [0.15, -0.3], [-0.15, 0.3], [0.15, 0.3]]
+  # ray_start_height: 1.0   # height above base to start each ray (m)
+  # ray_length: 5.0          # max ray length downward (m)
+  # geom_group_filter: null  # optional MuJoCo geom group to filter hits

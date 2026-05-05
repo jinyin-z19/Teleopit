@@ -9,6 +9,7 @@ from omegaconf import DictConfig
 
 from teleopit.interfaces import RobotState
 from teleopit.runtime.assets import GMR_ASSETS_ROOT, missing_gmr_assets_message
+from teleopit.sim.terrain_height_scanner import TerrainHeightScanner
 
 
 def _quat_conjugate(quat_wxyz: np.ndarray) -> np.ndarray:
@@ -139,6 +140,27 @@ class MuJoCoRobot:
         # Initialize to default pose
         self.reset()
 
+        # ── Terrain height scanner ──────────────────────────────────
+        terrain_cfg = cfg.get("terrain_height_scanner", {}) if hasattr(cfg, "get") else {}
+        self._terrain_scanner: TerrainHeightScanner | None = None
+        if terrain_cfg.get("enabled", False):
+            probe_offsets_raw = terrain_cfg.get("probe_offsets", None)
+            probe_offsets: list[tuple[float, float]] | None = None
+            if probe_offsets_raw is not None:
+                probe_offsets = [tuple(float(v) for v in pt) for pt in probe_offsets_raw]
+            self._terrain_scanner = TerrainHeightScanner(
+                model=self.model,
+                data=self.data,
+                probe_offsets=probe_offsets,
+                ray_start_height=float(terrain_cfg.get("ray_start_height", 1.0)),
+                ray_length=float(terrain_cfg.get("ray_length", 5.0)),
+                geom_group_filter=(
+                    int(terrain_cfg["geom_group_filter"])
+                    if terrain_cfg.get("geom_group_filter") is not None
+                    else None
+                ),
+            )
+
     # ── Properties ──────────────────────────────────────────────
 
     @property
@@ -193,6 +215,11 @@ class MuJoCoRobot:
             ang_vel_world = self.data.qvel[3:6].copy()
             ang_vel = _quat_rotate_inverse(quat, ang_vel_world)
 
+        # Scan terrain heights if scanner is enabled
+        terrain_heights: np.ndarray | None = None
+        if self._terrain_scanner is not None:
+            terrain_heights = self._terrain_scanner.scan(base_pos, quat)
+
         return RobotState(
             qpos=dof_pos,
             qvel=dof_vel,
@@ -201,6 +228,7 @@ class MuJoCoRobot:
             timestamp=float(self.data.time),
             base_pos=base_pos,
             base_lin_vel=np.asarray(base_lin_vel_b, dtype=np.float64),
+            terrain_heights=terrain_heights,
         )
 
     def apply_torque(self, torque: np.ndarray) -> None:

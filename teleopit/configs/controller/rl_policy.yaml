@@ -5,3 +5,10 @@ observation_type: "velcmd_history"
 action_scale: null  # inherited from robot config; set explicitly to override
 clip_range: [-10.0, 10.0]
 default_dof_pos: null
+
+# ── Terrain height observation ─────────────────────────────────────
+# num_height_points: number of terrain height probe points appended to
+#   the observation vector.  0 = disabled (171D default for azureloong_v9).
+#   Must match the probe_offsets count in robot.terrain_height_scanner.
+#   Default 25 = 5×5 grid over ±0.4 m → 171 + 25 = 196D total observation.
+num_height_points: 25
