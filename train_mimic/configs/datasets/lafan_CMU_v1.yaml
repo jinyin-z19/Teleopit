@@ -1,0 +1,6 @@
+# Merge spec: combines lafan1_v1 and CMU_v1 pre-built datasets.
+# Run:  python scripts/data/merge_datasets.py --spec train_mimic/configs/datasets/lafan_CMU_v1.yaml
+output: lafan_CMU_v1
+datasets:
+  - lafan1_v1
+  - CMU_v1

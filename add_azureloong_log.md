@@ -285,3 +285,64 @@ print(f'body_names[0]: {data[\"body_names\"][0]}')       # 应为 base_link
 print(f'fps: {int(data[\"fps\"])}')                      # 应为 30
 "
 ```
+
+
+## 数据集合并工具
+
+### 概述
+
+新增 `scripts/data/merge_datasets.py`，用于将多个已构建完成的 npz shard 数据集合并为一个。无需重新生成，直接按 shard 级别合并帧数据和 clip 元数据。
+
+支持两种输入模式：
+- **CLI 列表模式**: `--datasets A B C --output merged`（快速 ad-hoc）
+- **YAML spec 模式**: `--spec config.yaml`（可复现，推荐）
+
+### 新增/修改文件
+
+- **`scripts/data/merge_datasets.py`** (新增): 数据集合并脚本
+  - `_validate_split()`: 收集所有 shard，校验 body_names / fps / DOF 一致性
+  - `_merge_shards()`: 沿时间轴 concat 全部帧数据，调整 `clip_starts` 偏移量，写入单一 `shard_000.npz`
+  - `merge_datasets()`: 遍历 train/val，输出合并结果和 `build_info.json`
+  - `main()`: 支持 `--spec` YAML 和 `--datasets`/`--output` 两种模式，`--force` 覆盖已有输出
+
+- **`train_mimic/configs/datasets/lafan_CMU_v1.yaml`** (新增): lafan1_v1 + CMU_v1 合并 spec
+  ```yaml
+  output: lafan_CMU_v1
+  datasets:
+    - lafan1_v1
+    - CMU_v1
+  ```
+
+### 使用
+
+```bash
+# YAML spec 模式（推荐）
+python scripts/data/merge_datasets.py \
+    --spec train_mimic/configs/datasets/lafan_CMU_v1.yaml
+
+# CLI 列表模式
+python scripts/data/merge_datasets.py \
+    --datasets lafan1_v1 CMU_v1 dataset3 \
+    --output my_merged_v1
+
+# 覆盖已有输出
+python scripts/data/merge_datasets.py \
+    --spec train_mimic/configs/datasets/lafan_CMU_v1.yaml \
+    --force
+```
+
+### 合并结果
+
+| 数据集 | train clips | val clips | 总帧数 | 时长 (@30fps) |
+|--------|------------|----------|--------|---------------|
+| lafan1_v1 | ~77 | ~4 | ~62万 | ~5.7h |
+| CMU_v1 | ~1888 | ~92 | ~65万 | ~6.4h |
+| **lafan_CMU_v1** | **1963** | **94** | **1,303,036** | **12.1h** |
+
+### 训练
+
+```bash
+python train_mimic/scripts/train.py \
+    --task azureloong_v9 \
+    --motion_file data/datasets/lafan_CMU_v1/train
+```
