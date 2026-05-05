@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """Play back a trained tracking policy in simulation.
 
-Viewer options:
-  native  -- MuJoCo native window (default, requires display)
-  viser   -- browser-based 3D viewer at http://localhost:8012
+Modes (fastest → slowest):
+  headless -- no rendering at all, pure sim stepping (fastest)
+  video    -- render to rgb_array + encode video
+  viser    -- browser-based 3D viewer at http://localhost:8012
+  native   -- MuJoCo native window (default, requires display, slowest)
 
 Usage:
+    # Headless (fastest, no rendering)
+    python train_mimic/scripts/play.py \
+        --checkpoint logs/rsl_rl/g1_tracking/2026-.../model_30000.pt \
+        --motion_file data/datasets/twist2_full/val \
+        --headless
+
     # Native window
     python train_mimic/scripts/play.py \
         --checkpoint logs/rsl_rl/g1_tracking/2026-.../model_30000.pt \
@@ -17,7 +25,7 @@ Usage:
         --motion_file data/datasets/twist2_full/val \
         --viewer viser
 
-    # Record video instead of interactive viewer
+    # Record video (no window)
     python train_mimic/scripts/play.py \
         --checkpoint logs/rsl_rl/g1_tracking/2026-.../model_30000.pt \
         --motion_file data/datasets/twist2_full/val \
@@ -28,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 from train_mimic.app import (
@@ -50,7 +59,11 @@ def parse_args() -> argparse.Namespace:
         "--viewer", type=str, default="native", choices=["native", "viser"],
         help="native: MuJoCo window (requires display); viser: browser at localhost:8012",
     )
+    parser.add_argument("--headless", action="store_true",
+                        help="Run without any rendering (fastest, pure sim stepping)")
     parser.add_argument("--video", action="store_true", help="Record video instead of interactive viewer")
+    parser.add_argument("--steps_num", type=int, default=500,
+                        help="Number of steps in headless mode (default: 500)")
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--task", type=str, default=DEFAULT_TASK,
                         help="Task id to play (default: %(default)s)")
@@ -59,6 +72,14 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+
+    # ── GPU rendering for video mode (must be set BEFORE any MuJoCo/GL init) ──
+    if args.video and "MUJOCO_GL" not in os.environ:
+        os.environ["MUJOCO_GL"] = "egl"
+        print("[INFO] --video enabled, MUJOCO_GL not set. Defaulting to MUJOCO_GL=egl.")
+    if args.video and "PYOPENGL_PLATFORM" not in os.environ:
+        os.environ["PYOPENGL_PLATFORM"] = "egl"
+        print("[INFO] --video enabled, PYOPENGL_PLATFORM not set. Defaulting to PYOPENGL_PLATFORM=egl.")
 
     (
         torch,
@@ -95,7 +116,7 @@ def main() -> None:
 
     device = resolve_device(args.device, torch)
 
-    # render_mode only needed for video recording
+    # render_mode: rgb_array for video recording, None for headless/viewer
     render_mode = "rgb_array" if args.video else None
     env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=render_mode)
 
@@ -106,7 +127,7 @@ def main() -> None:
             env,
             video_folder=os.path.join(log_dir, "videos", "play"),
             step_trigger=lambda step: step == 0,
-            video_length=500,
+            video_length=args.steps_num,
             disable_logger=True,
         )
 
@@ -120,13 +141,45 @@ def main() -> None:
     runner.load(args.checkpoint, map_location=device)
     policy = runner.get_inference_policy(device=device)
 
-    if args.video:
-        # Run a fixed number of steps then close
+    if args.headless:
+        # Pure sim stepping, no rendering overhead — fastest mode
+        print(f"Running headless for {args.steps_num} steps...")
         obs = env.get_observations()
-        for _ in range(500):
+        t_start = time.time()
+        for i in range(args.steps_num):
+            t0 = time.time()
             with torch.no_grad():
                 actions = policy(obs)
+            t_policy = time.time()
             obs, _, _, _ = env.step(actions)
+            t_step = time.time()
+            if i < 5 or i % 100 == 0:
+                print(f"  step {i:4d}/{args.steps_num}  "
+                      f"policy={t_policy-t0:.3f}s  step={t_step-t_policy:.3f}s  "
+                      f"total={t_step-t0:.3f}s")
+        elapsed = time.time() - t_start
+        print(f"Done in {elapsed:.1f}s ({args.steps_num/elapsed:.1f} steps/s)")
+    elif args.video:
+        # Run a fixed number of steps then close
+        print(f"Recording {args.steps_num} steps to video...")
+        obs = env.get_observations()
+        t_start = time.time()
+        for i in range(args.steps_num):
+            t0 = time.time()
+            with torch.no_grad():
+                actions = policy(obs)
+            t_policy = time.time()
+            obs, _, _, _ = env.step(actions)
+            t_step = time.time()
+            print(f"  step {i:4d}/{args.steps_num}  "
+                    f"policy={t_policy-t0:.3f}s  step={t_step-t_policy:.3f}s  "
+                    f"total={t_step-t0:.3f}s")
+        elapsed = time.time() - t_start
+        print(f"Simulation done in {elapsed:.1f}s ({args.steps_num/elapsed:.1f} steps/s)")
+        print("Encoding video... (may take a while)")
+        t_enc = time.time()
+        env.close()  # triggers _finish_recording → media.write_video
+        print(f"Video saved in {time.time()-t_enc:.1f}s")
     elif args.viewer == "native":
         NativeMujocoViewer(env, policy).run()
     else:
