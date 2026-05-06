@@ -202,8 +202,8 @@ def ref_window_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
 
 # ---------------------------------------------------------------------------
 # Terrain height observation — scans terrain heights at probe points in the
-# robot body frame using MuJoCo ray casting (hfield geoms).  The probe grid
-# matches TerrainHeightScanner._DEFAULT_PROBE_GRID (5×5 over ±0.4 m).
+# robot body frame.  Uses manual ray-geom intersection to avoid numpy 2.x /
+# pybind11 incompatibility with ``mujoco.mj_ray`` in MuJoCo 3.8.0.
 # ---------------------------------------------------------------------------
 
 # Default probe point offsets in the robot body frame (X-forward, Y-left).
@@ -212,6 +212,53 @@ _DEFAULT_TERRAIN_PROBE_OFFSETS: list[tuple[float, float]] = [
     for x in [-0.4, -0.2, 0.0, 0.2, 0.4]
     for y in [-0.4, -0.2, 0.0, 0.2, 0.4]
 ]
+
+
+def _ray_plane_intersection_training(
+    ray_origin: np.ndarray,
+    ray_dir: np.ndarray,
+    geom_xpos: np.ndarray,
+    geom_xmat: np.ndarray,
+) -> float:
+    """Compute ray-plane intersection distance for a MuJoCo plane geom."""
+    normal = np.array([geom_xmat[2], geom_xmat[5], geom_xmat[8]], dtype=np.float64)
+    denom = float(np.dot(ray_dir, normal))
+    if abs(denom) < 1e-12:
+        return -1.0
+    t = float(np.dot(geom_xpos - ray_origin, normal)) / denom
+    if t < 0.0:
+        return -1.0
+    return t
+
+
+def _ray_cast_training(
+    model,
+    data,
+    ray_origin: np.ndarray,
+    ray_dir: np.ndarray,
+) -> float:
+    """Cast a ray against static (body 0) geoms; return nearest distance or -1."""
+    origin = np.asarray(ray_origin, dtype=np.float64).reshape(3)
+    direction = np.asarray(ray_dir, dtype=np.float64).reshape(3)
+    direction = direction / max(np.linalg.norm(direction), 1e-8)
+
+    best_t = 1e30
+    for i in range(model.ngeom):
+        body_id = model.geom_bodyid[i]
+        if body_id != 0:
+            continue  # skip non-static (robot) geoms
+        geom_type = model.geom_type[i]
+
+        if geom_type == 0:  # mjGEOM_PLANE
+            xpos = data.geom_xpos[i].copy()
+            xmat = data.geom_xmat[i].copy()
+            t = _ray_plane_intersection_training(origin, direction, xpos, xmat)
+            if 0.0 <= t < best_t:
+                best_t = t
+
+    if best_t < 1e29:
+        return best_t
+    return -1.0
 
 
 def terrain_heights(
@@ -249,7 +296,6 @@ def terrain_heights(
     """
     import math
 
-    import mujoco
     import numpy as np
 
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
@@ -265,10 +311,9 @@ def terrain_heights(
         )
 
     # Robot base state in world frame — batched tensors on env.device.
-    # root_state_w shape: (num_envs, 13) — [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
-    root_state = robot.data.root_state_w  # (num_envs, 13)
-    base_pos_w = root_state[:, 0:3]        # (num_envs, 3)
-    base_quat_w = root_state[:, 3:7]       # (num_envs, 4)  w,x,y,z
+    # Use individual properties (mjlab no longer exposes root_state_w directly).
+    base_pos_w = robot.data.root_link_pos_w   # (num_envs, 3)
+    base_quat_w = robot.data.root_link_quat_w  # (num_envs, 4)  w,x,y,z
 
     # Move tensors to CPU for MuJoCo ray calls.
     base_pos = base_pos_w.cpu().numpy()
@@ -316,15 +361,11 @@ def terrain_heights(
             ray_start = np.array([bp[0] + rx, bp[1] + ry, bp[2] + rz], dtype=np.float64)
             ray_dir = np.array([0.0, 0.0, -1.0], dtype=np.float64)
 
-            distance = mujoco.mj_ray(
+            distance = _ray_cast_training(
                 mj_model,
                 mj_data,
                 ray_start,
                 ray_dir,
-                None,   # geomgroup
-                -1,     # flg_static
-                -1,     # bodyexclude
-                None,   # geomid output
             )
 
             if distance >= 0.0 and distance <= ray_length:

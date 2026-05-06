@@ -133,3 +133,126 @@ class TestMuJoCoRobotStep:
         action = np.ones(29, dtype=np.float64) * 5.0
         robot.set_action(action)
         np.testing.assert_allclose(robot.data.ctrl[:29], 5.0)
+
+
+# ── Terrain height scanner integration ──────────────────────────
+
+def _make_terrain_robot_cfg(xml_path: str, terrain_enabled: bool = True):
+    """Build a robot config with optional terrain height scanner."""
+    try:
+        from omegaconf import OmegaConf
+    except ImportError:
+        return None
+
+    cfg_dict = {
+        "xml_path": xml_path,
+        "num_actions": 29,
+        "kps": [100] * 29,
+        "kds": [2] * 29,
+        "default_angles": [0.0] * 29,
+        "action_scale": 0.5,
+        "torque_limits": [100] * 29,
+        "sim_dt": 0.005,
+        "mujoco_default_qpos": [0, 0, 0.793, 1, 0, 0, 0] + [0.0] * 29,
+    }
+
+    if terrain_enabled:
+        cfg_dict["terrain_height_scanner"] = {
+            "enabled": True,
+            "probe_offsets": [
+                [-0.4, -0.4], [-0.4, -0.2], [-0.4, 0.0], [-0.4, 0.2], [-0.4, 0.4],
+                [-0.2, -0.4], [-0.2, -0.2], [-0.2, 0.0], [-0.2, 0.2], [-0.2, 0.4],
+                [0.0, -0.4], [0.0, -0.2], [0.0, 0.0], [0.0, 0.2], [0.0, 0.4],
+                [0.2, -0.4], [0.2, -0.2], [0.2, 0.0], [0.2, 0.2], [0.2, 0.4],
+                [0.4, -0.4], [0.4, -0.2], [0.4, 0.0], [0.4, 0.2], [0.4, 0.4],
+            ],
+            "ray_start_height": 1.0,
+            "ray_length": 5.0,
+            "geom_group_filter": None,
+        }
+    else:
+        cfg_dict["terrain_height_scanner"] = {"enabled": False}
+
+    return OmegaConf.create(cfg_dict)
+
+
+@requires_mujoco
+@_skip_no_xml
+class TestMuJoCoRobotTerrainScanner:
+    """Test terrain height scanner integration in MuJoCoRobot."""
+
+    def test_terrain_scanner_created_when_enabled(self):
+        from teleopit.robots.mujoco_robot import MuJoCoRobot
+        cfg = _make_terrain_robot_cfg(_XML_PATH, terrain_enabled=True)
+        if cfg is None:
+            pytest.skip("omegaconf not available")
+        robot = MuJoCoRobot(cfg)
+        assert robot._terrain_scanner is not None
+        assert robot._terrain_scanner.num_points == 25
+
+    def test_terrain_scanner_not_created_when_disabled(self):
+        from teleopit.robots.mujoco_robot import MuJoCoRobot
+        cfg = _make_terrain_robot_cfg(_XML_PATH, terrain_enabled=False)
+        if cfg is None:
+            pytest.skip("omegaconf not available")
+        robot = MuJoCoRobot(cfg)
+        assert robot._terrain_scanner is None
+
+    def test_terrain_scanner_not_created_when_missing_section(self):
+        from teleopit.robots.mujoco_robot import MuJoCoRobot
+        try:
+            from omegaconf import OmegaConf
+        except ImportError:
+            pytest.skip("omegaconf not available")
+
+        cfg = OmegaConf.create({
+            "xml_path": _XML_PATH,
+            "num_actions": 29,
+            "kps": [100] * 29,
+            "kds": [2] * 29,
+            "default_angles": [0.0] * 29,
+            "action_scale": 0.5,
+            "torque_limits": [100] * 29,
+            "sim_dt": 0.005,
+            "mujoco_default_qpos": [0, 0, 0.793, 1, 0, 0, 0] + [0.0] * 29,
+        })
+        robot = MuJoCoRobot(cfg)
+        assert robot._terrain_scanner is None
+
+    def test_get_state_includes_terrain_heights_when_enabled(self):
+        from teleopit.robots.mujoco_robot import MuJoCoRobot
+        cfg = _make_terrain_robot_cfg(_XML_PATH, terrain_enabled=True)
+        if cfg is None:
+            pytest.skip("omegaconf not available")
+        robot = MuJoCoRobot(cfg)
+        state = robot.get_state()
+
+        assert state.terrain_heights is not None
+        assert state.terrain_heights.shape == (25,)
+        assert state.terrain_heights.dtype == np.float32
+        # Plane floor → all heights ~0
+        np.testing.assert_allclose(state.terrain_heights, 0.0, atol=0.1)
+
+    def test_get_state_terrain_heights_none_when_disabled(self):
+        from teleopit.robots.mujoco_robot import MuJoCoRobot
+        cfg = _make_terrain_robot_cfg(_XML_PATH, terrain_enabled=False)
+        if cfg is None:
+            pytest.skip("omegaconf not available")
+        robot = MuJoCoRobot(cfg)
+        state = robot.get_state()
+
+        assert state.terrain_heights is None
+
+    def test_get_state_terrain_heights_consistent_across_calls(self):
+        from teleopit.robots.mujoco_robot import MuJoCoRobot
+        cfg = _make_terrain_robot_cfg(_XML_PATH, terrain_enabled=True)
+        if cfg is None:
+            pytest.skip("omegaconf not available")
+        robot = MuJoCoRobot(cfg)
+
+        heights1 = robot.get_state().terrain_heights
+        robot.step()
+        heights2 = robot.get_state().terrain_heights
+
+        # Heights should be consistent (plane floor, same position)
+        np.testing.assert_allclose(heights1, heights2, atol=0.1)
