@@ -64,6 +64,12 @@ Sim2Sim 侧 (teleopit):
 | 射线最大长度 | `train_mimic/tasks/tracking/mdp/observations.py` | `terrain_heights()` 函数 `ray_length` 默认参数 |
 | 噪声 (actor only) | `train_mimic/tasks/tracking/config/azureloong_v9_env.py` | `_VELCMD_ACTOR_TERMS["terrain_heights"].noise` |
 | 探测器附着 | `train_mimic/tasks/tracking/mdp/observations.py` | `terrain_heights()` 中每个 env 以 `root_link_pos_w / root_link_quat_w` 为原点 |
+| **地形类型** | `train_mimic/tasks/tracking/config/azureloong_v9_constants.py` | `TERRAIN_TYPE` — `"plane"` 或 `"generator"` |
+| **地块总尺寸** | `train_mimic/tasks/tracking/config/azureloong_v9_constants.py` | `TERRAIN_GENERATOR_KWARGS["size"]` |
+| **地块行列数** | `train_mimic/tasks/tracking/config/azureloong_v9_constants.py` | `TERRAIN_GENERATOR_KWARGS["num_rows/num_cols"]` |
+| **各地块权重** | `train_mimic/tasks/tracking/config/azureloong_v9_constants.py` | `TERRAIN_SUB_TERRAINS[name]["proportion"]` |
+| **各地块类型** | `train_mimic/tasks/tracking/config/azureloong_v9_constants.py` | `TERRAIN_SUB_TERRAINS[name]["cls"]` |
+| **各地块高度范围** | `train_mimic/tasks/tracking/config/azureloong_v9_constants.py` | `TERRAIN_SUB_TERRAINS[name]["config"][*_range]` |
 
 > **规则**：sim2sim 侧的 `num_height_points`、`probe_offsets` 数量、训练侧的 `num_height_points`、默认探头网格数量——四者必须一致（当前均为 **25**）。
 
@@ -133,7 +139,7 @@ terrain_height_scanner:
 
 ### 5. `train_mimic/tasks/tracking/config/azureloong_v9_env.py`
 
-**改动**：在 `_VELCMD_ACTOR_TERMS` 和 `_VELCMD_CRITIC_TERMS` 中新增 `"terrain_heights"` 观测项。
+**改动 1**：在 `_VELCMD_ACTOR_TERMS` 和 `_VELCMD_CRITIC_TERMS` 中新增 `"terrain_heights"` 观测项。
 
 ```python
 "terrain_heights": ObservationTermCfg(
@@ -143,10 +149,63 @@ terrain_height_scanner:
 ),
 ```
 
+**改动 2**：`make_azureloong_v9_tracking_env_cfg()` 中注入地形配置：
+
+```python
+cfg.scene.entities = {"robot": get_azureloong_v9_robot_cfg()}
+cfg.scene.terrain = build_terrain_cfg()    # ← 从 constants 读取地形配置
+```
+
 **理由**：
 - Actor 包含 ±0.02 m 噪声用于领域随机化
 - Critic 不包含噪声（privileged observation）
 - `num_height_points=25` 必须与 sim2sim 的 `rl_policy.yaml` 和 `azureloong_v9.yaml` 一致
+- 地形生成参数从 `azureloong_v9_constants.py` 集中管理，无需改 `env.py` 或 `tracking_env_cfg.py`
+
+
+### 6. `train_mimic/tasks/tracking/config/azureloong_v9_constants.py`
+
+**改动**：新增地形生成配置段，集中管理所有地形参数。
+
+**核心常量**：
+
+```python
+TERRAIN_TYPE: str = "generator"     # "plane" | "generator"
+
+TERRAIN_GENERATOR_KWARGS: dict = {
+    "size": (20.0, 20.0),            # 总尺寸 (宽×长, m)
+    "num_rows": 1, "num_cols": 1,    # 子地块行列数
+    "border_width": 0.0,
+}
+
+TERRAIN_SUB_TERRAINS: dict[str, dict] = {
+    # 每个地块独立设置类型、权重、尺寸、高度范围
+}
+```
+
+**默认混合地形**（随机楼梯 25% + 随机网格 25% + 波浪 25% + 平地 25%）：
+
+| 地块名 | 类型 (`cls`) | 权重 | 高度参数 | 高度范围 |
+|--------|-------------|------|----------|----------|
+| `random_stairs` | `BoxRandomStairsTerrainCfg` | 25% | `step_height_range` | 0.02–0.15 m |
+| `random_grid` | `BoxRandomGridTerrainCfg` | 25% | `grid_height_range` | -0.05–0.20 m |
+| `waves` | `HfWaveTerrainCfg` | 25% | `amplitude_range` | 0.02–0.12 m |
+| `flat` | `HfRandomUniformTerrainCfg` | 25% | `noise_range` | 0.0–0.0 m |
+
+**`build_terrain_cfg()` 工厂函数**：根据以上常量自动构建 `TerrainEntityCfg`。当 `TERRAIN_TYPE == "plane"` 时返回简单平地配置；当 `"generator"` 时遍历 `TERRAIN_SUB_TERRAINS` 创建各地块实例并组装 `TerrainGeneratorCfg`。proportion 总和校验确保权重和为 1.0。
+
+**支持的地形类型及高度参数**：
+
+| `cls` 值 | 类 | 高度参数 | 说明 |
+|----------|-----|----------|------|
+| `BoxRandomStairsTerrainCfg` | 随机楼梯 | `step_height_range: (min, max)` | 每级台阶高度 (m) |
+| `BoxRandomGridTerrainCfg` | 随机网格 | `grid_height_range: (min, max)` | 网格方块高度 (m)，可为负值 |
+| `HfWaveTerrainCfg` | 正弦波 | `amplitude_range: (min, max)` | 波幅 (m) |
+| `HfRandomUniformTerrainCfg` | 随机高度场 | `noise_range: (min, max)` | 均匀随机高度 (m) |
+| `HfPyramidSlopedTerrainCfg` | 金字塔斜坡 | `slope_range: (min, max)` | 坡度 (rad) |
+| `HfDiscreteObstaclesTerrainCfg` | 离散障碍物 | `obstacle_height_range: (min, max)` | 障碍物高度 (m) |
+
+**理由**：地形生成、地块组合比例、各地块类型及高度范围全部在一处配置，修改时无需跨文件查找。`tracking_env_cfg.py` 保持共享（G1 不受影响）。
 
 ---
 

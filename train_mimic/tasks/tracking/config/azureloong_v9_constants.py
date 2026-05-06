@@ -129,3 +129,126 @@ def get_azureloong_v9_robot_cfg() -> EntityCfg:
         spec_fn=get_spec,
         articulation=AZURELOONG_V9_ARTICULATION,
     )
+
+
+# ---------------------------------------------------------------------------
+# Terrain configuration
+# ---------------------------------------------------------------------------
+
+from mjlab.terrains import (  # noqa: E402
+    TerrainEntityCfg,
+    TerrainGeneratorCfg,
+    SubTerrainCfg,
+    HfRandomUniformTerrainCfg,
+    HfWaveTerrainCfg,
+    HfPyramidSlopedTerrainCfg,
+    HfDiscreteObstaclesTerrainCfg,
+    BoxRandomGridTerrainCfg,
+    BoxRandomStairsTerrainCfg,
+)
+
+# Switch between "plane" (flat, infinite) and "generator" (procedural).
+TERRAIN_TYPE: str = "generator"
+
+# Only used when TERRAIN_TYPE == "generator".
+TERRAIN_GENERATOR_KWARGS: dict = {
+    "size": (20.0, 20.0),   # total terrain width × length (m)
+    "num_rows": 1,           # sub-terrain grid rows
+    "num_cols": 1,           # sub-terrain grid columns
+    "border_width": 0.0,
+}
+
+# Sub-terrain patches.
+# Each entry maps a name → concrete SubTerrainCfg subclass kwargs.
+# proportion must sum to 1.0 across all entries.
+# Supported classes ("cls"):
+#   HfRandomUniformTerrainCfg  — random uniform heightfield  (noise_range)
+#   HfWaveTerrainCfg           — sinusoidal waves             (amplitude_range)
+#   HfPyramidSlopedTerrainCfg  — pyramid slopes               (slope_range)
+#   HfDiscreteObstaclesTerrainCfg — discrete block obstacles  (obstacle_height_range)
+#   BoxRandomGridTerrainCfg    — random grid of boxes         (grid_height_range)
+#   BoxRandomStairsTerrainCfg  — random staircases            (step_height_range)
+TERRAIN_SUB_TERRAINS: dict[str, dict] = {
+    "random_stairs": {
+        "proportion": 0.25,
+        "size": (10.0, 10.0),
+        "cls": "BoxRandomStairsTerrainCfg",
+        "config": {
+            "step_height_range": (0.02, 0.15),   # min / max step height (m)
+            "platform_width": 1.0,
+            "border_width": 0.25,
+        },
+    },
+    "random_grid": {
+        "proportion": 0.25,
+        "size": (10.0, 10.0),
+        "cls": "BoxRandomGridTerrainCfg",
+        "config": {
+            "grid_height_range": (-0.05, 0.20),  # min / max grid height (m)
+            "grid_width": 0.45,
+            "platform_width": 1.0,
+            "border_width": 0.25,
+        },
+    },
+    "waves": {
+        "proportion": 0.25,
+        "size": (10.0, 10.0),
+        "cls": "HfWaveTerrainCfg",
+        "config": {
+            "amplitude_range": (0.02, 0.12),     # min / max wave amplitude (m)
+            "num_waves": 2,
+            "horizontal_scale": 0.1,
+        },
+    },
+    "flat": {
+        "proportion": 0.25,
+        "size": (10.0, 10.0),
+        "cls": "HfRandomUniformTerrainCfg",
+        "config": {
+            "noise_range": (0.0, 0.0),           # flat — zero height
+            "horizontal_scale": 0.1,
+        },
+    },
+}
+
+# Map class name string → class
+_TERRAIN_CLS_MAP: dict[str, type] = {
+    "HfRandomUniformTerrainCfg": HfRandomUniformTerrainCfg,
+    "HfWaveTerrainCfg": HfWaveTerrainCfg,
+    "HfPyramidSlopedTerrainCfg": HfPyramidSlopedTerrainCfg,
+    "HfDiscreteObstaclesTerrainCfg": HfDiscreteObstaclesTerrainCfg,
+    "BoxRandomGridTerrainCfg": BoxRandomGridTerrainCfg,
+    "BoxRandomStairsTerrainCfg": BoxRandomStairsTerrainCfg,
+}
+
+
+def build_terrain_cfg() -> TerrainEntityCfg:
+    """Build TerrainEntityCfg from the constants above."""
+    if TERRAIN_TYPE == "plane":
+        return TerrainEntityCfg(terrain_type="plane")
+
+    # --- generator mode ---
+    sub_terrains: dict[str, SubTerrainCfg] = {}
+    for name, spec in TERRAIN_SUB_TERRAINS.items():
+        cls_name: str = spec["cls"]
+        terrain_cls = _TERRAIN_CLS_MAP[cls_name]
+        sub_terrains[name] = terrain_cls(
+            proportion=spec["proportion"],
+            size=spec["size"],
+            flat_patch_sampling=spec.get("flat_patch_sampling"),
+            **spec["config"],
+        )
+
+    total_p = sum(s.proportion for s in sub_terrains.values())
+    if abs(total_p - 1.0) > 0.01:
+        raise ValueError(
+            f"Terrain sub-terrain proportions sum to {total_p}, expected 1.0"
+        )
+
+    return TerrainEntityCfg(
+        terrain_type="generator",
+        terrain_generator=TerrainGeneratorCfg(
+            sub_terrains=sub_terrains,
+            **TERRAIN_GENERATOR_KWARGS,
+        ),
+    )

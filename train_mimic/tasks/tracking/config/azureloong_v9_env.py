@@ -13,6 +13,7 @@ from mjlab.utils.noise import UniformNoiseCfg as Unoise
 from train_mimic.tasks.tracking import mdp
 from train_mimic.tasks.tracking.config.azureloong_v9_constants import (
     AZURELOONG_V9_ACTION_SCALE,
+    build_terrain_cfg,
     get_azureloong_v9_robot_cfg,
 )
 from train_mimic.tasks.tracking.config.constants import DEFAULT_TRAIN_MOTION_FILE
@@ -139,6 +140,7 @@ def make_azureloong_v9_tracking_env_cfg(
     cfg = make_tracking_env_cfg()
 
     cfg.scene.entities = {"robot": get_azureloong_v9_robot_cfg()}
+    cfg.scene.terrain = build_terrain_cfg()
     cfg.scene.sensors = (
         ContactSensorCfg(
             name="self_collision",
