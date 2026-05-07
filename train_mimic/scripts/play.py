@@ -55,7 +55,8 @@ _logger = logging.getLogger(__name__)
 
 def _attach_terrain_probe_renderer(env) -> None:
     """Attach a terrain-probe debug callback to *env* so that
-    ``env.update_visualizers`` draws coloured height-scan spheres.
+    ``env.update_visualizers`` draws coloured height-scan spheres
+    **in addition to** the existing ghost / command / sensor visualizers.
 
     Must be called before wrapping *env* with ``VideoRecorder`` or
     ``RslRlVecEnvWrapper``.
@@ -70,7 +71,16 @@ def _attach_terrain_probe_renderer(env) -> None:
 
     probe_offsets = list(_DEFAULT_TERRAIN_PROBE_OFFSETS[:25])
     drawer = TerrainProbeDrawer(probe_offsets, ray_start_height=1.0)
-    env.update_visualizers = drawer.make_update_callback(env)
+    terrain_cb = drawer.make_update_callback(env)
+
+    # Chain with the existing update_visualizers method (ghost robot, etc.).
+    _original = env.update_visualizers
+
+    def _chained(visualizer) -> None:
+        _original(visualizer)
+        terrain_cb(visualizer)
+
+    env.update_visualizers = _chained
     print(f"[play] Terrain probe renderer attached ({drawer.num_points} points)")
 
 
