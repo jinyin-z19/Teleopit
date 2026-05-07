@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import time
 
@@ -48,6 +49,29 @@ from train_mimic.app import (
     validate_checkpoint_path,
     validate_motion_file,
 )
+
+_logger = logging.getLogger(__name__)
+
+
+def _attach_terrain_probe_renderer(env) -> None:
+    """Attach a terrain-probe debug callback to *env* so that
+    ``env.update_visualizers`` draws coloured height-scan spheres.
+
+    Must be called before wrapping *env* with ``VideoRecorder`` or
+    ``RslRlVecEnvWrapper``.
+    """
+    try:
+        from teleopit.sim.terrain_probe_drawer import TerrainProbeDrawer
+        from train_mimic.tasks.tracking.mdp.observations import (
+            _DEFAULT_TERRAIN_PROBE_OFFSETS,
+        )
+    except ImportError:
+        return
+
+    probe_offsets = list(_DEFAULT_TERRAIN_PROBE_OFFSETS[:25])
+    drawer = TerrainProbeDrawer(probe_offsets, ray_start_height=1.0)
+    env.update_visualizers = drawer.make_update_callback(env)
+    print(f"[play] Terrain probe renderer attached ({drawer.num_points} points)")
 
 
 def parse_args() -> argparse.Namespace:
@@ -119,6 +143,9 @@ def main() -> None:
     # render_mode: rgb_array for video recording, None for headless/viewer
     render_mode = "rgb_array" if args.video else None
     env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode=render_mode)
+
+    # ── Terrain probe renderer ──────────────────────────────────────
+    _attach_terrain_probe_renderer(env)
 
     if args.video:
         from mjlab.utils.wrappers import VideoRecorder
