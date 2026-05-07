@@ -2,6 +2,7 @@ import os
 import pathlib
 import statistics
 import time
+import warnings
 from typing import cast
 
 import torch
@@ -71,6 +72,48 @@ class _OnnxMotionModel(nn.Module):
         )
 
 
+def _handle_nan_in_env_output(
+    obs: "torch.Tensor | dict",
+    rewards: torch.Tensor,
+    dones: torch.Tensor,
+    iteration: int,
+) -> None:
+    """Replace NaN/Inf in env output with zeros and log a warning.
+
+    Unlike ``check_nan`` which raises on first NaN, this function replaces
+    all NaN/Inf values with zeros so training can continue.  It also marks
+    the affected environment(s) as done so they are reset on the next step.
+    """
+    nan_env_ids: set[int] = set()
+
+    if isinstance(obs, dict):
+        for key, tensor in obs.items():
+            nan_mask = torch.isnan(tensor) | torch.isinf(tensor)
+            if nan_mask.any():
+                nan_envs = nan_mask.any(dim=tuple(range(1, tensor.dim()))).nonzero(as_tuple=True)[0]
+                nan_env_ids.update(nan_envs.tolist())
+                obs[key] = torch.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
+    elif torch.is_tensor(obs):
+        nan_mask = torch.isnan(obs) | torch.isinf(obs)
+        if nan_mask.any():
+            nan_envs = nan_mask.any(dim=tuple(range(1, obs.dim()))).nonzero(as_tuple=True)[0]
+            nan_env_ids.update(nan_envs.tolist())
+            obs.copy_(torch.nan_to_num(obs, nan=0.0, posinf=0.0, neginf=0.0))
+
+    if torch.isnan(rewards).any() or torch.isinf(rewards).any():
+        nan_env_ids.update(torch.isnan(rewards).nonzero(as_tuple=True)[0].tolist())
+        nan_env_ids.update(torch.isinf(rewards).nonzero(as_tuple=True)[0].tolist())
+        rewards.copy_(torch.nan_to_num(rewards, nan=0.0, posinf=0.0, neginf=0.0))
+
+    if nan_env_ids:
+        dones[list(nan_env_ids)] = True
+        warnings.warn(
+            f"[iter {iteration}] NaN/Inf detected in env output for "
+            f"environments {sorted(nan_env_ids)}. Replaced with zeros and "
+            f"marked as done for auto-reset."
+        )
+
+
 class MotionTrackingOnPolicyRunner(MjlabOnPolicyRunner):
     env: RslRlVecEnvWrapper
 
@@ -110,7 +153,7 @@ class MotionTrackingOnPolicyRunner(MjlabOnPolicyRunner):
                     actions = self.alg.act(obs)
                     obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
                     if self.cfg.get("check_for_nan", True):
-                        check_nan(obs, rewards, dones)
+                        _handle_nan_in_env_output(obs, rewards, dones, it)
                     obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
                     self.alg.process_env_step(obs, rewards, dones, extras)
                     intrinsic_rewards = self.alg.intrinsic_rewards if self.cfg["algorithm"]["rnd_cfg"] else None

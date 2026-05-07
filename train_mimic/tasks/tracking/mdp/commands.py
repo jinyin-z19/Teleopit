@@ -55,7 +55,11 @@ def _batched_quat_slerp(
     w1 = torch.where(safe, w1_slerp, t)
 
     result = w0 * q0 + w1 * q1
-    return result / result.norm(dim=-1, keepdim=True)
+    norm = result.norm(dim=-1, keepdim=True)
+    # Guard against zero-norm quaternions (degenerate slerp edge case)
+    safe_norm = torch.where(norm > 1e-12, norm, torch.ones_like(norm))
+    result = result / safe_norm
+    return torch.nan_to_num(result, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def _compute_clip_counts(

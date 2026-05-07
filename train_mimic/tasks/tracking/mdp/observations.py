@@ -18,30 +18,44 @@ if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedRlEnv
 
 
+def _safe_nan_to_num(tensor: torch.Tensor) -> torch.Tensor:
+    """Replace NaN/Inf with zeros, returning the original tensor if clean.
+
+    MDP observation functions use quaternion math (quat_inv, quat_apply,
+    subtract_frame_transforms, matrix_from_quat) whose output can become NaN
+    when motion-capture data contains degenerate quaternions (e.g. near-zero
+    norm after slerp interpolation).  This guard prevents NaN from propagating
+    into actor/critic observations and crashing training.
+    """
+    if torch.isnan(tensor).any() or torch.isinf(tensor).any():
+        return torch.nan_to_num(tensor, nan=0.0, posinf=0.0, neginf=0.0)
+    return tensor
+
+
 def motion_anchor_pos_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
     pos, _ = subtract_frame_transforms(
-        command.robot_anchor_pos_w,
-        command.robot_anchor_quat_w,
-        command.anchor_pos_w,
-        command.anchor_quat_w,
+        _safe_nan_to_num(command.robot_anchor_pos_w),
+        _safe_nan_to_num(command.robot_anchor_quat_w),
+        _safe_nan_to_num(command.anchor_pos_w),
+        _safe_nan_to_num(command.anchor_quat_w),
     )
 
-    return pos.view(env.num_envs, -1)
+    return _safe_nan_to_num(pos.view(env.num_envs, -1))
 
 
 def motion_anchor_ori_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
     _, ori = subtract_frame_transforms(
-        command.robot_anchor_pos_w,
-        command.robot_anchor_quat_w,
-        command.anchor_pos_w,
-        command.anchor_quat_w,
+        _safe_nan_to_num(command.robot_anchor_pos_w),
+        _safe_nan_to_num(command.robot_anchor_quat_w),
+        _safe_nan_to_num(command.anchor_pos_w),
+        _safe_nan_to_num(command.anchor_quat_w),
     )
-    mat = matrix_from_quat(ori)
-    return mat[..., :2].reshape(mat.shape[0], -1)
+    mat = matrix_from_quat(_safe_nan_to_num(ori))
+    return _safe_nan_to_num(mat[..., :2].reshape(mat.shape[0], -1))
 
 
 def robot_body_pos_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
@@ -49,13 +63,13 @@ def robot_body_pos_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
 
     num_bodies = len(command.cfg.body_names)
     pos_b, _ = subtract_frame_transforms(
-        command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1),
-        command.robot_anchor_quat_w[:, None, :].repeat(1, num_bodies, 1),
-        command.robot_body_pos_w,
-        command.robot_body_quat_w,
+        _safe_nan_to_num(command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1)),
+        _safe_nan_to_num(command.robot_anchor_quat_w[:, None, :].repeat(1, num_bodies, 1)),
+        _safe_nan_to_num(command.robot_body_pos_w),
+        _safe_nan_to_num(command.robot_body_quat_w),
     )
 
-    return pos_b.view(env.num_envs, -1)
+    return _safe_nan_to_num(pos_b.view(env.num_envs, -1))
 
 
 def robot_body_ori_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
@@ -63,13 +77,13 @@ def robot_body_ori_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
 
     num_bodies = len(command.cfg.body_names)
     _, ori_b = subtract_frame_transforms(
-        command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1),
-        command.robot_anchor_quat_w[:, None, :].repeat(1, num_bodies, 1),
-        command.robot_body_pos_w,
-        command.robot_body_quat_w,
+        _safe_nan_to_num(command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1)),
+        _safe_nan_to_num(command.robot_anchor_quat_w[:, None, :].repeat(1, num_bodies, 1)),
+        _safe_nan_to_num(command.robot_body_pos_w),
+        _safe_nan_to_num(command.robot_body_quat_w),
     )
-    mat = matrix_from_quat(ori_b)
-    return mat[..., :2].reshape(mat.shape[0], -1)
+    mat = matrix_from_quat(_safe_nan_to_num(ori_b))
+    return _safe_nan_to_num(mat[..., :2].reshape(mat.shape[0], -1))
 
 
 # ---------------------------------------------------------------------------
@@ -81,13 +95,17 @@ def robot_body_ori_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
 def ref_base_lin_vel_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     """Reference anchor linear velocity in the robot's body frame. (N, 3)"""
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
-    return quat_apply(quat_inv(command.robot_anchor_quat_w), command.anchor_lin_vel_w)
+    robot_quat = _safe_nan_to_num(command.robot_anchor_quat_w)
+    lin_vel = _safe_nan_to_num(command.anchor_lin_vel_w)
+    return _safe_nan_to_num(quat_apply(quat_inv(robot_quat), lin_vel))
 
 
 def ref_base_ang_vel_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     """Reference anchor angular velocity in the robot's body frame. (N, 3)"""
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
-    return quat_apply(quat_inv(command.robot_anchor_quat_w), command.anchor_ang_vel_w)
+    robot_quat = _safe_nan_to_num(command.robot_anchor_quat_w)
+    ang_vel = _safe_nan_to_num(command.anchor_ang_vel_w)
+    return _safe_nan_to_num(quat_apply(quat_inv(robot_quat), ang_vel))
 
 
 def ref_projected_gravity_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
@@ -98,7 +116,9 @@ def ref_projected_gravity_b(env: ManagerBasedRlEnv, command_name: str) -> torch.
     """
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
     asset = env.scene[command.cfg.entity_name]
-    return quat_apply(quat_inv(command.anchor_quat_w), asset.data.gravity_vec_w)
+    anchor_quat = _safe_nan_to_num(command.anchor_quat_w)
+    gravity = _safe_nan_to_num(asset.data.gravity_vec_w)
+    return _safe_nan_to_num(quat_apply(quat_inv(anchor_quat), gravity))
 
 
 def ref_base_height(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
@@ -117,56 +137,56 @@ def motion_anchor_pos_b_yaw(env: ManagerBasedRlEnv, command_name: str) -> torch.
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
     pos, _ = subtract_frame_transforms(
-        command.robot_anchor_pos_w,
-        yaw_quat(command.robot_anchor_quat_w),
-        command.anchor_pos_w,
-        command.anchor_quat_w,
+        _safe_nan_to_num(command.robot_anchor_pos_w),
+        yaw_quat(_safe_nan_to_num(command.robot_anchor_quat_w)),
+        _safe_nan_to_num(command.anchor_pos_w),
+        _safe_nan_to_num(command.anchor_quat_w),
     )
 
-    return pos.view(env.num_envs, -1)
+    return _safe_nan_to_num(pos.view(env.num_envs, -1))
 
 
 def motion_anchor_ori_b_yaw(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
     _, ori = subtract_frame_transforms(
-        command.robot_anchor_pos_w,
-        yaw_quat(command.robot_anchor_quat_w),
-        command.anchor_pos_w,
-        command.anchor_quat_w,
+        _safe_nan_to_num(command.robot_anchor_pos_w),
+        yaw_quat(_safe_nan_to_num(command.robot_anchor_quat_w)),
+        _safe_nan_to_num(command.anchor_pos_w),
+        _safe_nan_to_num(command.anchor_quat_w),
     )
-    mat = matrix_from_quat(ori)
-    return mat[..., :2].reshape(mat.shape[0], -1)
+    mat = matrix_from_quat(_safe_nan_to_num(ori))
+    return _safe_nan_to_num(mat[..., :2].reshape(mat.shape[0], -1))
 
 
 def robot_body_pos_b_yaw(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
     num_bodies = len(command.cfg.body_names)
-    robot_yaw = yaw_quat(command.robot_anchor_quat_w)
+    robot_yaw = yaw_quat(_safe_nan_to_num(command.robot_anchor_quat_w))
     pos_b, _ = subtract_frame_transforms(
-        command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1),
+        _safe_nan_to_num(command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1)),
         robot_yaw[:, None, :].repeat(1, num_bodies, 1),
-        command.robot_body_pos_w,
-        command.robot_body_quat_w,
+        _safe_nan_to_num(command.robot_body_pos_w),
+        _safe_nan_to_num(command.robot_body_quat_w),
     )
 
-    return pos_b.view(env.num_envs, -1)
+    return _safe_nan_to_num(pos_b.view(env.num_envs, -1))
 
 
 def robot_body_ori_b_yaw(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
 
     num_bodies = len(command.cfg.body_names)
-    robot_yaw = yaw_quat(command.robot_anchor_quat_w)
+    robot_yaw = yaw_quat(_safe_nan_to_num(command.robot_anchor_quat_w))
     _, ori_b = subtract_frame_transforms(
-        command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1),
+        _safe_nan_to_num(command.robot_anchor_pos_w[:, None, :].repeat(1, num_bodies, 1)),
         robot_yaw[:, None, :].repeat(1, num_bodies, 1),
-        command.robot_body_pos_w,
-        command.robot_body_quat_w,
+        _safe_nan_to_num(command.robot_body_pos_w),
+        _safe_nan_to_num(command.robot_body_quat_w),
     )
-    mat = matrix_from_quat(ori_b)
-    return mat[..., :2].reshape(mat.shape[0], -1)
+    mat = matrix_from_quat(_safe_nan_to_num(ori_b))
+    return _safe_nan_to_num(mat[..., :2].reshape(mat.shape[0], -1))
 
 
 # ---------------------------------------------------------------------------
@@ -182,10 +202,10 @@ def ref_window_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     """
     command = cast(MotionCommand, env.command_manager.get_term(command_name))
     asset = env.scene[command.cfg.entity_name]
-    gravity_w = asset.data.gravity_vec_w  # (B, 3)
+    gravity_w = _safe_nan_to_num(asset.data.gravity_vec_w)  # (B, 3)
 
     # ref_projected_gravity_b for each window frame: (B, W, 3)
-    win_quat = command.window_anchor_quat_w  # (B, W, 4)
+    win_quat = _safe_nan_to_num(command.window_anchor_quat_w)  # (B, W, 4)
     B, W, _ = win_quat.shape
     win_quat_inv = quat_inv(win_quat.reshape(-1, 4)).reshape(B, W, 4)
     win_proj_grav = quat_apply(
@@ -194,10 +214,10 @@ def ref_window_b(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     ).reshape(B, W, 3)
 
     # ref joint pos/vel: (B, W, 29)
-    win_joint_pos = command.window_joint_pos
-    win_joint_vel = command.window_joint_vel
+    win_joint_pos = _safe_nan_to_num(command.window_joint_pos)
+    win_joint_vel = _safe_nan_to_num(command.window_joint_vel)
 
-    return torch.cat([win_proj_grav, win_joint_pos, win_joint_vel], dim=-1)
+    return _safe_nan_to_num(torch.cat([win_proj_grav, win_joint_pos, win_joint_vel], dim=-1))
 
 
 # ---------------------------------------------------------------------------
