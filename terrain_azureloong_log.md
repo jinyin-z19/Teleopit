@@ -397,3 +397,122 @@ Conv1d 输入通道：`Conv1d(196, 128, ...)`，确认网络适配 196D 观测�
 1. **手动射线投射不支持所有 MuJoCo geom 类型**：`_ray_cast` 仅支持 plane、box、hfield。sphere、capsule、cylinder、ellipsoid、mesh 类型遇到时返回无交点（-1）。对于 terrain scanning 使用场景（仅 plane / hfield），影响可忽略。
 2. **hfield 步进精度**：`_ray_hfield_intersection` 使用 2cm 步长，精度 ±2cm。可通过减小步长提高精度（以性能为代价）。
 3. **`geom_group_filter` 语义变更**：手动 `_ray_cast` 未实现 MuJoCo geom group 过滤（仅按 `body_id == 0` 过滤静态 geom）。`TerrainHeightScanner` 的 `geom_group_filter` 参数被忽略。
+
+---
+
+## 八、地形探测点渲染 (2026-05-07)
+
+### 8.1 新增文件
+
+#### `teleopit/sim/terrain_probe_drawer.py`
+
+地形探测点可视化模块，在 3D 场景中以彩色球体渲染 25 个探头位置及当前采样高度。
+
+**三种渲染路径**：
+
+| 方法 | 适用场景 | 接口 |
+|------|---------|------|
+| `draw_via_visualizer()` | play.py（video / native / viser） | `DebugVisualizer.add_sphere()` |
+| `init_scene_geoms()` / `update_scene_geoms()` | render_sim.py | 直接操作 `MjvScene` |
+| `make_update_callback(env)` | play.py 便捷工厂 | 返回 `(visualizer) → None` 回调 |
+
+**关键参数**：
+```python
+TerrainProbeDrawer(
+    probe_offsets,        # 探头偏移列表（与 _DEFAULT_TERRAIN_PROBE_OFFSETS 一致）
+    ray_start_height=1.0, # 射线起始高度 (m)
+    fixed_color=(1.0, 0.0, 0.0, 0.85),  # 固定红色；None = 蓝→绿→红渐变
+)
+```
+
+**探测点着色**：默认固定红色 `(1, 0, 0, 0.85)`。`fixed_color=None` 时按高度渐变（低→蓝，中→绿，高→红）。
+
+**`make_update_callback(env)`** 会自动从 env 读取 `root_link_pos_w` / `root_link_quat_w`，调用训练侧 `terrain_heights()` 获取采样高度，每帧绘制彩色球体。
+
+### 8.2 `train_mimic/scripts/play.py` 改动
+
+#### 改动 1：GL 平台初始化移到文件顶部
+
+`MUJOCO_GL=egl` / `PYOPENGL_PLATFORM=egl` 设置从 `main()` 移到 `from __future__` 之后、任何 mujoco import 之前：
+
+```python
+from __future__ import annotations
+import os as _os, sys as _sys
+if "--video" in _sys.argv:
+    _os.environ.setdefault("MUJOCO_GL", "egl")
+    _os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+```
+
+**理由**：模块顶部的 `from mjlab.viewer import ...` 已触发 MuJoCo GL 初始化，`main()` 中设置 `os.environ` 太晚导致 `FatalError: an OpenGL platform library has not been loaded`。移到文件最顶部确保在 mujoco 首次 import 前生效。
+
+#### 改动 2：`_attach_terrain_probe_renderer(env)` 函数
+
+在 `ManagerBasedRlEnv` 创建后、`VideoRecorder` 包装前调用，将地形探测点渲染接入 `env.update_visualizers` 回调链。
+
+**链式调用**（不覆盖原有 ghost / command 可视化）：
+```python
+_original = env.update_visualizers        # 内置方法，渲染 ghost / 命令等
+
+def _chained(visualizer):
+    _original(visualizer)                  # 先画参考动作 ghost
+    terrain_cb(visualizer)                 # 再画地形探测点（红色球体）
+
+env.update_visualizers = _chained
+```
+
+**数据流**：
+```
+env.step() → env.render()
+  → OffscreenRenderer.update(debug_vis_callback=env.update_visualizers)
+    → _chained(visualizer)
+      → _original(visualizer)           # ghost robot
+      → terrain_cb(visualizer)           # 25 个红色球体
+        → root_link_pos_w / root_link_quat_w
+        → terrain_heights()
+        → visualizer.add_sphere()
+```
+
+#### 改动 3：视频自动递增编号
+
+扫描 `videos/play/rl-video-step-*.mp4`，找最大编号 N，新视频命名为 `rl-video-step-{N+1}.mp4`。
+
+**逻辑**：
+```python
+_max_n = -1
+for p in glob(os.path.join(video_folder, "rl-video-step-*.mp4")):
+    m = re.search(r"rl-video-step-(\d+)", os.path.basename(p))
+    if m:
+        _max_n = max(_max_n, int(m.group(1)))
+_video_idx = _max_n + 1
+```
+
+VideoRecorder 始终输出 `rl-video-step-0.mp4`，录制结束后 rename 为 `rl-video-step-{_video_idx}.mp4`。只改新文件，不碰已有视频；其他命名格式的文件被忽略。
+
+### 8.3 使用方式
+
+```bash
+# 无需手动设置 MUJOCO_GL，直接 --video 即可
+python train_mimic/scripts/play.py \
+    --task azureloong_v9 \
+    --checkpoint logs/rsl_rl/azureloong_v9_general_tracking/<run>/model_14000.pt \
+    --motion_file data/datasets/CMU_v1/val \
+    --num_envs 1 \
+    --video
+
+# native / viser 模式同样自动渲染探测点
+python train_mimic/scripts/play.py \
+    --task azureloong_v9 \
+    --checkpoint ... \
+    --motion_file ... \
+    --viewer native
+```
+
+视频输出：`logs/.../videos/play/rl-video-step-{N}.mp4`，自动递增编号，内含 ghost 参考动作 + 红色地形探测点 + 混合地形。
+
+### 8.4 渲染效果
+
+- **参考动作（ghost）**：半透明蓝色机器人，显示 motion 目标姿态
+- **地形探测点**：25 个红色小球，位于各探头射线与地形表面交点之上 2cm
+- **地形**：混合地块（随机楼梯 + 随机网格 + 波浪 + 平地）
+
+探测点颜色可通过 `TerrainProbeDrawer(fixed_color=...)` 自定义。设为 `None` 时按高度蓝→绿→红渐变。

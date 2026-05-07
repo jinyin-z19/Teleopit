@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
+# ── Must run BEFORE any mujoco import (GL platform selection) ─────
+import os as _os, sys as _sys
+if "--video" in _sys.argv:
+    _os.environ.setdefault("MUJOCO_GL", "egl")
+    _os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
+
 """Play back a trained tracking policy in simulation.
 
 Modes (fastest → slowest):
@@ -32,12 +40,12 @@ Usage:
         --video
 """
 
-from __future__ import annotations
-
 import argparse
 import logging
 import os
 import time
+import re
+from glob import glob
 
 from mjlab.viewer import NativeMujocoViewer, ViserPlayViewer
 from train_mimic.app import (
@@ -107,14 +115,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # ── GPU rendering for video mode (must be set BEFORE any MuJoCo/GL init) ──
-    if args.video and "MUJOCO_GL" not in os.environ:
-        os.environ["MUJOCO_GL"] = "egl"
-        print("[INFO] --video enabled, MUJOCO_GL not set. Defaulting to MUJOCO_GL=egl.")
-    if args.video and "PYOPENGL_PLATFORM" not in os.environ:
-        os.environ["PYOPENGL_PLATFORM"] = "egl"
-        print("[INFO] --video enabled, PYOPENGL_PLATFORM not set. Defaulting to PYOPENGL_PLATFORM=egl.")
-
     (
         torch,
         ManagerBasedRlEnv,
@@ -160,9 +160,19 @@ def main() -> None:
     if args.video:
         from mjlab.utils.wrappers import VideoRecorder
         log_dir = os.path.dirname(args.checkpoint)
+        video_folder = os.path.join(log_dir, "videos", "play")
+
+        # Auto-increment: find max N in rl-video-step-*.mp4 → use N+1.
+        _max_n = -1
+        for p in glob(os.path.join(video_folder, "rl-video-step-*.mp4")):
+            m = re.search(r"rl-video-step-(\d+)", os.path.basename(p))
+            if m:
+                _max_n = max(_max_n, int(m.group(1)))
+        _video_idx = _max_n + 1
+
         env = VideoRecorder(
             env,
-            video_folder=os.path.join(log_dir, "videos", "play"),
+            video_folder=video_folder,
             step_trigger=lambda step: step == 0,
             video_length=args.steps_num,
             disable_logger=True,
@@ -217,6 +227,13 @@ def main() -> None:
         t_enc = time.time()
         env.close()  # triggers _finish_recording → media.write_video
         print(f"Video saved in {time.time()-t_enc:.1f}s")
+
+        # ── Rename to auto-incremented index ───────────────────────
+        _default_path = os.path.join(video_folder, "rl-video-step-0.mp4")
+        _target_path = os.path.join(video_folder, f"rl-video-step-{_video_idx}.mp4")
+        if _video_idx != 0 and os.path.isfile(_default_path):
+            os.rename(_default_path, _target_path)
+            print(f"[play] Renamed: rl-video-step-0.mp4 → rl-video-step-{_video_idx}.mp4")
     elif args.viewer == "native":
         NativeMujocoViewer(env, policy).run()
     else:

@@ -72,15 +72,22 @@ class TerrainProbeDrawer:
         2D offsets in robot body frame (X-forward, Y-left).
     ray_start_height : float
         Height above base from which rays are cast.
+    fixed_color : tuple or None
+        If a 4-tuple (r, g, b, a), all probes use this color.
+        If None, uses the height-based blue→green→red gradient.
     """
 
     def __init__(
         self,
         probe_offsets: list[tuple[float, float]],
         ray_start_height: float = 1.0,
+        fixed_color: tuple[float, float, float, float] | None = (
+            1.0, 0.0, 0.0, 0.85,
+        ),
     ) -> None:
         self._probe_offsets = list(probe_offsets)
         self._ray_start_height = float(ray_start_height)
+        self._fixed_color = fixed_color
         self.num_points = len(self._probe_offsets)
 
     # ── mjlab DebugVisualizer path (play.py native / viser) ──────────
@@ -106,7 +113,11 @@ class TerrainProbeDrawer:
             center = (bp + offset_w).astype(np.float64)
             # Shift probe sphere to the actual terrain height
             center[2] = float(h[i]) + 0.02  # small z-offset above surface
-            color = _height_color(float(h[i]), h_min, h_max)
+            color = (
+                self._fixed_color
+                if self._fixed_color is not None
+                else _height_color(float(h[i]), h_min, h_max)
+            )
             visualizer.add_sphere(center, 0.03, color)
 
     # ── Raw MuJoCo scene path (render_sim.py, mocap viewer) ──────────
@@ -152,7 +163,11 @@ class TerrainProbeDrawer:
             offset_w = _quat_rotate_vec(bq, [ox, oy, self._ray_start_height])
             center = bp + offset_w
             center[2] = float(h[i]) + 0.02
-            color = _height_color(float(h[i]), h_min, h_max)
+            color = (
+                self._fixed_color
+                if self._fixed_color is not None
+                else _height_color(float(h[i]), h_min, h_max)
+            )
             g = scene.geoms[self._mjv_geoms[i]]
             g.pos[:] = center.astype(np.float64)
             g.rgba[:] = np.array(color, dtype=np.float32)
